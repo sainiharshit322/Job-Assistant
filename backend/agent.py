@@ -61,14 +61,12 @@ class JobMatchingAgent:
         
         workflow = StateGraph(JobMatchingState)
         
-        # Add nodes
         workflow.add_node("resume_analysis", self._resume_analysis_node)
         workflow.add_node("job_search", self._job_search_node)
         workflow.add_node("job_matching", self._job_matching_node)
         workflow.add_node("cover_letter_generation", self._cover_letter_node)
         workflow.add_node("interview_tips_generation", self._interview_tips_node)
         
-        # Define edges
         workflow.add_edge(START, "resume_analysis")
         workflow.add_edge("resume_analysis", "job_search")
         workflow.add_edge("job_search", "job_matching")
@@ -158,7 +156,6 @@ class JobMatchingAgent:
         query = state.get("search_query", "developer")
         
         try:
-            # Try India first
             indian_jobs = self._get_indian_jobs(query)
             if indian_jobs:
                 return {
@@ -169,7 +166,6 @@ class JobMatchingAgent:
                     "error": ""
                 }
             
-            # Fallback to US
             us_jobs = self._get_us_jobs(query)
             if us_jobs:
                 return {
@@ -180,7 +176,6 @@ class JobMatchingAgent:
                     "error": ""
                 }
             
-            # Demo data
             demo_jobs = self._get_indian_jobs(query)
             return {
                 **state,
@@ -210,7 +205,6 @@ class JobMatchingAgent:
         job = state["selected_job"]
         resume_analysis = state.get("resume_analysis", "")
         
-        # Format salary display
         salary_info = "Not specified"
         if job.get("salary_min") and job.get("salary_max"):
             currency = job.get("currency", "USD")
@@ -284,7 +278,6 @@ class JobMatchingAgent:
         try:
             response = self.llm.invoke([HumanMessage(content=prompt)])
             
-            # Extract match score using regex
             match_patterns = [
                 r'(\d+)%',
                 r'match.*?(\d+)%',
@@ -478,7 +471,6 @@ class JobMatchingAgent:
                 "error": f"Error generating interview tips: {str(e)}"
             }
     
-    # Helper methods for job searching (same as before)
     def _get_indian_jobs(self, query: str) -> List[Dict]:
         """Get Indian jobs (sample data)"""
         
@@ -591,7 +583,6 @@ What We Offer:
             print(f"Error fetching US jobs: {e}")
             return []
     
-    # Public API methods that use the LangGraph workflow
     def process_resume_and_search(self, resume_text: str, search_query: str) -> JobMatchingState:
         """Process resume and search jobs using LangGraph workflow"""
         
@@ -611,14 +602,12 @@ What We Offer:
             "error": ""
         }
         
-        # Run partial workflow (resume analysis + job search)
         final_state = self.workflow.invoke(initial_state, {"recursion_limit": 2})
         return final_state
     
     def complete_job_analysis(self, state: JobMatchingState, selected_job_id: str) -> JobMatchingState:
         """Complete the job analysis workflow for selected job"""
         
-        # Find selected job
         selected_job = None
         for job in state.get("jobs", []):
             if job["id"] == selected_job_id:
@@ -631,18 +620,15 @@ What We Offer:
                 "error": "Selected job not found"
             }
         
-        # Update state with selected job
         updated_state: JobMatchingState = {
             **state,
             "selected_job": selected_job,
             "selected_job_id": selected_job_id
         }
         
-        # Run complete workflow
         final_state = self.workflow.invoke(updated_state)
         return final_state
     
-    # Individual method access for API endpoints
     def analyze_resume(self, resume_text: str) -> str:
         """Standalone resume analysis"""
         state: JobMatchingState = {
