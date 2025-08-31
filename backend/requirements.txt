@@ -1,0 +1,13 @@
+langchain-core
+langgraph
+langchain-ollama
+uvicorn
+PyPDF2
+feedparser
+requests
+typing-extensions
+dotenv
+flask
+flask-cors
+pdfplumber
+werkzeug
