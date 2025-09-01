@@ -114,11 +114,9 @@ def upload_resume():
         if not resume_text.strip():
             return jsonify({"error": "Could not extract readable text from PDF"}), 400
         
-        # Analyze resume
         logger.info(f"Analyzing resume for session {session_id}")
         resume_analysis = agent.analyze_resume(resume_text)
         
-        # Store in temporary storage
         temp_storage[session_id] = {
             "resume_text": resume_text,
             "resume_analysis": resume_analysis,
@@ -166,21 +164,17 @@ def search_jobs():
     try:
         logger.info(f"Searching jobs for query: {query}, session: {session_id}")
         
-        # Search jobs
         jobs, location = agent.search_jobs(query)
         
         if not jobs:
             return jsonify({"error": "No jobs found for the given query"}), 404
         
-        # Store jobs in session
         temp_storage[session_id]['jobs'] = jobs
         temp_storage[session_id]['search_query'] = query
         temp_storage[session_id]['location'] = location
         
-        # Format response
         formatted_jobs = []
         for job in jobs:
-            # Format salary for display
             salary_display = "Not specified"
             if job.get('salary_min') and job.get('salary_max'):
                 currency = job.get('currency', 'USD')
@@ -234,7 +228,6 @@ def analyze_match():
     session_id = data['session_id']
     job_id = data['job_id']
     
-    # Validate session
     if session_id not in temp_storage:
         return jsonify({"error": "Invalid session. Please upload resume first."}), 400
     
@@ -243,7 +236,6 @@ def analyze_match():
     if not session_data.get('jobs'):
         return jsonify({"error": "No jobs found in session. Please search jobs first."}), 400
     
-    # Find selected job
     selected_job = None
     for job in session_data['jobs']:
         if job['id'] == job_id:
@@ -256,17 +248,14 @@ def analyze_match():
     try:
         logger.info(f"Analyzing match for job {job_id}, session {session_id}")
         
-        # Perform match analysis
         match_result = agent.analyze_job_match(
             session_data['resume_analysis'],
             selected_job
         )
         
-        # Store match result in session
         temp_storage[session_id]['last_match'] = match_result
         temp_storage[session_id]['selected_job'] = selected_job
         
-        # Format salary for response
         salary_display = "Not specified"
         if selected_job.get('salary_min') and selected_job.get('salary_max'):
             currency = selected_job.get('currency', 'USD')
@@ -312,7 +301,6 @@ def generate_cover_letter():
     
     session_id = data['session_id']
     
-    # Validate session
     if session_id not in temp_storage:
         return jsonify({"error": "Invalid session"}), 400
     
@@ -330,7 +318,6 @@ def generate_cover_letter():
             session_data['last_match']['analysis']
         )
         
-        # Store in session
         temp_storage[session_id]['cover_letter'] = cover_letter
         
         return jsonify({
@@ -362,7 +349,6 @@ def generate_interview_tips():
     
     session_id = data['session_id']
     
-    # Validate session
     if session_id not in temp_storage:
         return jsonify({"error": "Invalid session"}), 400
     
@@ -380,7 +366,6 @@ def generate_interview_tips():
             session_data['last_match']['analysis']
         )
         
-        # Store in session
         temp_storage[session_id]['interview_tips'] = interview_tips
         
         return jsonify({
@@ -441,7 +426,6 @@ def internal_error(e):
     logger.error(f"Internal server error: {e}")
     return jsonify({"error": "Internal server error"}), 500
 
-# Test endpoint to verify Flask is working
 @app.route('/', methods=['GET'])
 def root():
     return jsonify({
@@ -460,7 +444,6 @@ def root():
     }), 200
 
 if __name__ == '__main__':
-    # Check Ollama connection on startup
     try:
         from langchain_core.messages import HumanMessage
         if agent and agent.llm:
@@ -477,10 +460,9 @@ if __name__ == '__main__':
     print("📝 Temporary storage cleanup runs every hour")
     print("🔗 API endpoints available at http://localhost:5000")
     
-    # Use only Flask's built-in server
     app.run(
         host='0.0.0.0',
         port=5000,
         debug=True,
-        threaded=True  # Enable threading for better performance
+        threaded=True  
     )
