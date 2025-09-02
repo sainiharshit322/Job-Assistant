@@ -1,165 +1,188 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
 import { 
   Brain, 
-  Menu, 
-  X, 
-  Sparkles, 
-  User, 
-  Settings,
-  LogOut,
-  Home
+  Heart, 
+  Twitter, 
+  Github, 
+  Linkedin, 
+  Mail,
+  MapPin,
+  Phone
 } from 'lucide-react';
 
-const Navbar = () => {
-  const [isScrolled, setIsScrolled] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
+const Footer = () => {
+  const currentYear = new Date().getFullYear();
 
-  useEffect(() => {
-    const handleScroll = () => {
-      setIsScrolled(window.scrollY > 20);
-    };
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+  const footerLinks = {
+    product: [
+      { name: 'Features', href: '/features' },
+      { name: 'Pricing', href: '/pricing' },
+      { name: 'API Docs', href: '/docs' },
+      { name: 'Integrations', href: '/integrations' },
+    ],
+    company: [
+      { name: 'About Us', href: '/about' },
+      { name: 'Careers', href: '/careers' },
+      { name: 'Blog', href: '/blog' },
+      { name: 'Press Kit', href: '/press' },
+    ],
+    support: [
+      { name: 'Help Center', href: '/help' },
+      { name: 'Contact Us', href: '/contact' },
+      { name: 'Status', href: '/status' },
+      { name: 'Community', href: '/community' },
+    ],
+    legal: [
+      { name: 'Privacy Policy', href: '/privacy' },
+      { name: 'Terms of Service', href: '/terms' },
+      { name: 'Cookie Policy', href: '/cookies' },
+      { name: 'GDPR', href: '/gdpr' },
+    ],
+  };
 
-  const navItems = [
-    { name: 'Home', href: '/', icon: Home },
-    { name: 'Dashboard', href: '/dashboard', icon: Sparkles },
-    { name: 'Jobs', href: '/jobs', icon: Brain },
+  const socialLinks = [
+    { name: 'Twitter', icon: Twitter, href: 'https://twitter.com', color: 'hover:text-blue-400' },
+    { name: 'GitHub', icon: Github, href: 'https://github.com', color: 'hover:text-gray-300' },
+    { name: 'LinkedIn', icon: Linkedin, href: 'https://linkedin.com', color: 'hover:text-blue-500' },
+    { name: 'Email', icon: Mail, href: 'mailto:hello@aijobassistant.com', color: 'hover:text-green-400' },
   ];
 
   return (
-    <motion.nav
-      initial={{ y: -100 }}
-      animate={{ y: 0 }}
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        isScrolled 
-          ? 'glass backdrop-blur-xl shadow-lg' 
-          : 'bg-transparent'
-      }`}
-    >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
-          {/* Logo */}
-          <motion.div 
-            className="flex items-center space-x-2"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            <div className="p-2 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 shadow-lg">
-              <Brain className="h-6 w-6 text-white" />
-            </div>
-            <div className="hidden sm:block">
-              <h1 className="text-xl font-bold text-white">
-                AI Job Assistant
-              </h1>
-              <p className="text-xs text-white/70 -mt-1">
-                Powered by AI
-              </p>
-            </div>
-          </motion.div>
+    <footer className="relative mt-20 overflow-hidden">
+      {/* Background Effects */}
+      <div className="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-800 to-transparent opacity-90" />
+      <div className="absolute inset-0">
+        <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary-500/10 rounded-full blur-3xl" />
+        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-accent-500/10 rounded-full blur-3xl" />
+      </div>
 
-          {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center space-x-8">
-            {navItems.map((item) => (
-              <motion.a
-                key={item.name}
-                href={item.href}
-                className="flex items-center space-x-2 text-white/80 hover:text-white transition-colors duration-200 group"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <item.icon className="h-4 w-4 group-hover:text-primary-400 transition-colors" />
-                <span className="font-medium">{item.name}</span>
-              </motion.a>
-            ))}
-          </div>
+      <div className="relative">
 
-          {/* Profile & Mobile Menu */}
-          <div className="flex items-center space-x-4">
-            {/* Profile Dropdown */}
-            <div className="relative">
-              <motion.button
-                onClick={() => setIsProfileOpen(!isProfileOpen)}
-                className="flex items-center space-x-2 glass p-2 rounded-xl text-white hover:bg-white/10 transition-colors"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <div className="w-8 h-8 bg-gradient-to-br from-primary-400 to-accent-400 rounded-lg flex items-center justify-center">
-                  <User className="h-4 w-4 text-white" />
-                </div>
-                <span className="hidden sm:block font-medium">Profile</span>
-              </motion.button>
-
-              {/* Profile Dropdown */}
-              {isProfileOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  className="absolute right-0 mt-2 w-48 glass rounded-xl shadow-xl py-2"
-                >
-                  <a href="/profile" className="flex items-center space-x-2 px-4 py-2 text-white/80 hover:text-white hover:bg-white/10 transition-colors">
-                    <User className="h-4 w-4" />
-                    <span>My Profile</span>
-                  </a>
-                  <a href="/settings" className="flex items-center space-x-2 px-4 py-2 text-white/80 hover:text-white hover:bg-white/10 transition-colors">
-                    <Settings className="h-4 w-4" />
-                    <span>Settings</span>
-                  </a>
-                  <hr className="my-2 border-white/20" />
-                  <a href="/logout" className="flex items-center space-x-2 px-4 py-2 text-red-400 hover:text-red-300 hover:bg-white/10 transition-colors">
-                    <LogOut className="h-4 w-4" />
-                    <span>Sign Out</span>
-                  </a>
-                </motion.div>
-              )}
-            </div>
-
-            {/* Mobile menu button */}
-            <motion.button
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="md:hidden glass p-2 rounded-xl text-white hover:bg-white/10 transition-colors"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              {isMobileMenuOpen ? (
-                <X className="h-6 w-6" />
-              ) : (
-                <Menu className="h-6 w-6" />
-              )}
-            </motion.button>
-          </div>
-        </div>
-
-        {/* Mobile Navigation Menu */}
-        {isMobileMenuOpen && (
+        {/* Main Footer Content */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
+          {/* Top Section */}
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="md:hidden glass mt-2 rounded-xl overflow-hidden"
+            initial={{ opacity: 0, y: 50 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8 }}
+            className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12"
           >
-            <div className="px-2 pt-2 pb-3 space-y-1">
-              {navItems.map((item) => (
-                <a
-                  key={item.name}
-                  href={item.href}
-                  className="flex items-center space-x-3 px-3 py-2 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors"
-                  onClick={() => setIsMobileMenuOpen(false)}
+            {/* Company Info */}
+            <div className="lg:col-span-1">
+              <motion.div 
+                className="flex items-center space-x-3 mb-6"
+                whileHover={{ scale: 1.05 }}
+              >
+                <div className="p-3 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 shadow-lg">
+                  <Brain className="h-8 w-8 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold text-white">AI Job Assistant</h3>
+                  <p className="text-sm text-white/70">Powered by Advanced AI</p>
+                </div>
+              </motion.div>
+              
+              <p className="text-white/80 mb-6 leading-relaxed">
+                Transform your job search with AI-powered resume analysis, job matching, 
+                and personalized career guidance. Your next career breakthrough is just one upload away.
+              </p>
+
+              {/* Contact Info */}
+              <div className="space-y-3 mb-6">
+                <div className="flex items-center space-x-3 text-white/70">
+                  <MapPin className="h-4 w-4" />
+                  <span className="text-sm">San Francisco, CA 94105</span>
+                </div>
+                <div className="flex items-center space-x-3 text-white/70">
+                  <Phone className="h-4 w-4" />
+                  <span className="text-sm">+1 (555) 123-4567</span>
+                </div>
+                <div className="flex items-center space-x-3 text-white/70">
+                  <Mail className="h-4 w-4" />
+                  <span className="text-sm">hello@aijobassistant.com</span>
+                </div>
+              </div>
+
+              {/* Social Links */}
+              <div className="flex space-x-4">
+                {socialLinks.map((social) => (
+                  <motion.a
+                    key={social.name}
+                    href={social.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`p-3 glass rounded-xl text-white/70 ${social.color} transition-colors duration-200`}
+                    whileHover={{ scale: 1.1, y: -2 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    <social.icon className="h-5 w-5" />
+                  </motion.a>
+                ))}
+              </div>
+            </div>
+
+            {/* Footer Links */}
+            <div className="lg:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-8">
+              {Object.entries(footerLinks).map(([category, links], categoryIndex) => (
+                <motion.div
+                  key={category}
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: categoryIndex * 0.1 }}
                 >
-                  <item.icon className="h-5 w-5" />
-                  <span className="font-medium">{item.name}</span>
-                </a>
+                  <h4 className="text-white font-semibold text-sm uppercase tracking-wider mb-4">
+                    {category}
+                  </h4>
+                  <ul className="space-y-3">
+                    {links.map((link) => (
+                      <li key={link.name}>
+                        <motion.a
+                          href={link.href}
+                          className="text-white/70 hover:text-white text-sm transition-colors duration-200"
+                          whileHover={{ x: 5 }}
+                        >
+                          {link.name}
+                        </motion.a>
+                      </li>
+                    ))}
+                  </ul>
+                </motion.div>
               ))}
             </div>
           </motion.div>
-        )}
+
+          {/* Bottom Section */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            transition={{ duration: 0.8 }}
+            className="border-t border-white/10 pt-8"
+          >
+            <div className="flex flex-col md:flex-row justify-between items-center">
+              <div className="flex items-center space-x-2 text-white/70 text-sm mb-4 md:mb-0">
+                <span>© {currentYear} AI Job Assistant. Made with</span>
+                <Heart className="h-4 w-4 text-red-500 animate-pulse" />
+                <span>for job seekers worldwide.</span>
+              </div>
+              
+              <div className="flex items-center space-x-6 text-sm text-white/70">
+                <a href="/sitemap" className="hover:text-white transition-colors">
+                  Sitemap
+                </a>
+                <a href="/accessibility" className="hover:text-white transition-colors">
+                  Accessibility
+                </a>
+                <a href="/security" className="hover:text-white transition-colors">
+                  Security
+                </a>
+              </div>
+            </div>
+          </motion.div>
+        </div>
       </div>
-    </motion.nav>
+    </footer>
   );
 };
 
-export default Navbar;
+export default Footer;
