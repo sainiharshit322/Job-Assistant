@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import HomePage from './pages/HomePage';
+import JobsPage from './pages/JobsPage';
+import DashboardPage from './pages/DashboardPage';
 import './index.css';
 
 function App() {
@@ -13,6 +15,8 @@ function App() {
         <main>
           <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/jobs" element={<JobsPage />} />
           </Routes>
         </main>
         <Footer />
