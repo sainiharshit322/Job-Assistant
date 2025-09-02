@@ -213,9 +213,9 @@ const ResumeAnalysis = ({ analysis, filename }) => {
                 </div>
                 
                 <div className="space-y-2">
-                  <p className="text-white/80 text-sm line-clamp-4">
+                  <div className="text-white/80 text-sm line-clamp-4 font-sans leading-relaxed">
                     {card.content || 'Analysis content will appear here...'}
-                  </p>
+                  </div>
                   
                   <motion.button
                     onClick={() => toggleSection(card.title)}
@@ -241,9 +241,9 @@ const ResumeAnalysis = ({ analysis, filename }) => {
                       exit={{ opacity: 0, height: 0 }}
                       className="mt-4 pt-4 border-t border-white/10"
                     >
-                      <pre className="text-white/70 text-sm whitespace-pre-wrap">
+                      <div className="text-white/70 text-sm font-sans leading-relaxed whitespace-pre-wrap">
                         {card.content}
-                      </pre>
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -261,9 +261,9 @@ const ResumeAnalysis = ({ analysis, filename }) => {
             className="glass rounded-2xl p-6"
           >
             <h3 className="text-xl font-bold text-white mb-6">Technical Skills Analysis</h3>
-            <pre className="text-white/80 whitespace-pre-wrap">
+            <div className="text-white/80 font-sans leading-relaxed whitespace-pre-wrap">
               {parsedAnalysis.skills || 'Skills analysis will appear here...'}
-            </pre>
+            </div>
           </motion.div>
         )}
 
@@ -276,9 +276,9 @@ const ResumeAnalysis = ({ analysis, filename }) => {
             className="glass rounded-2xl p-6"
           >
             <h3 className="text-xl font-bold text-white mb-6">Experience Analysis</h3>
-            <pre className="text-white/80 whitespace-pre-wrap">
+            <div className="text-white/80 font-sans leading-relaxed whitespace-pre-wrap">
               {parsedAnalysis.experience || 'Experience analysis will appear here...'}
-            </pre>
+            </div>
           </motion.div>
         )}
 
@@ -295,24 +295,24 @@ const ResumeAnalysis = ({ analysis, filename }) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <h4 className="text-lg font-semibold text-green-400 mb-3">Strengths</h4>
-                  <pre className="text-white/80 text-sm whitespace-pre-wrap">
+                  <div className="text-white/80 text-sm font-sans leading-relaxed whitespace-pre-wrap">
                     {parsedAnalysis.strengths}
-                  </pre>
+                  </div>
                 </div>
                 <div>
                   <h4 className="text-lg font-semibold text-orange-400 mb-3">Areas for Improvement</h4>
-                  <pre className="text-white/80 text-sm whitespace-pre-wrap">
+                  <div className="text-white/80 text-sm font-sans leading-relaxed whitespace-pre-wrap">
                     {parsedAnalysis.improvements}
-                  </pre>
+                  </div>
                 </div>
               </div>
             </div>
             
             <div className="glass rounded-2xl p-6">
               <h3 className="text-xl font-bold text-white mb-4">Market Positioning</h3>
-              <pre className="text-white/80 whitespace-pre-wrap">
+              <div className="text-white/80 font-sans leading-relaxed whitespace-pre-wrap">
                 {parsedAnalysis.positioning}
-              </pre>
+              </div>
             </div>
           </motion.div>
         )}
@@ -344,10 +344,11 @@ const ResumeAnalysis = ({ analysis, filename }) => {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
+              className="mt-4 pt-4 border-t border-white/10"
             >
-              <pre className="text-white/80 whitespace-pre-wrap text-sm leading-relaxed">
+              <div className="text-white/80 font-sans text-sm leading-relaxed whitespace-pre-wrap max-h-96 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
                 {analysis}
-              </pre>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
