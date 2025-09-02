@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom'; // Add this import
 import { 
   Brain, 
   Sparkles, 
@@ -24,9 +25,23 @@ const HomePage = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [analysisData, setAnalysisData] = useState(null);
   const [apiStatus, setApiStatus] = useState('checking');
+  const navigate = useNavigate(); // Add this hook
 
   useEffect(() => {
     checkAPIStatus();
+    // Check if we have existing session data
+    const existingSessionId = localStorage.getItem('sessionId');
+    const existingAnalysis = localStorage.getItem('resumeAnalysis');
+    const existingFilename = localStorage.getItem('resumeFilename');
+    
+    if (existingSessionId && existingAnalysis) {
+      setAnalysisData({
+        sessionId: existingSessionId,
+        analysis: existingAnalysis,
+        filename: existingFilename || 'Previous Resume'
+      });
+      setCurrentStep(2);
+    }
   }, []);
 
   const checkAPIStatus = async () => {
@@ -41,44 +56,28 @@ const HomePage = () => {
   };
 
   const handleAnalysisComplete = (data) => {
+    // Store data in localStorage for persistence
+    localStorage.setItem('sessionId', data.sessionId);
+    localStorage.setItem('resumeAnalysis', data.analysis);
+    localStorage.setItem('resumeFilename', data.filename);
+    
     setAnalysisData(data);
     setCurrentStep(2);
     toast.success('Resume analysis completed!');
   };
 
-  const features = [
-    {
-      icon: Brain,
-      title: 'AI-Powered Analysis',
-      description: 'Advanced AI analyzes your resume to identify strengths, skills, and improvement areas.',
-      color: 'from-blue-500 to-purple-600'
-    },
-    {
-      icon: Search,
-      title: 'Smart Job Matching',
-      description: 'Find the most relevant jobs based on your profile and career goals.',
-      color: 'from-green-500 to-teal-600'
-    },
-    {
-      icon: FileText,
-      title: 'Cover Letter Generator',
-      description: 'Generate personalized cover letters tailored to specific job applications.',
-      color: 'from-purple-500 to-pink-600'
-    },
-    {
-      icon: MessageSquare,
-      title: 'Interview Preparation',
-      description: 'Get customized interview tips and practice questions for your target roles.',
-      color: 'from-orange-500 to-red-600'
+  const handleFindJobs = () => {
+    if (!analysisData || !analysisData.sessionId) {
+      toast.error('Please complete resume analysis first');
+      return;
     }
-  ];
 
-  const stats = [
-    { icon: Users, value: '50K+', label: 'Users Helped', color: 'text-blue-400' },
-    { icon: Award, value: '95%', label: 'Success Rate', color: 'text-green-400' },
-    { icon: Globe, value: '150+', label: 'Countries', color: 'text-purple-400' },
-    { icon: Zap, value: '24/7', label: 'AI Support', color: 'text-orange-400' }
-  ];
+    localStorage.setItem('autoSearch', 'true'); 
+    localStorage.setItem('defaultSearchQuery', 'developer'); 
+    
+    navigate('/jobs');
+    toast.success('Redirecting to job search...');
+  };
 
   const steps = [
     { number: 1, title: 'Upload Resume', description: 'Upload your PDF resume for AI analysis' },
@@ -166,32 +165,6 @@ const HomePage = () => {
                    apiStatus === 'offline' ? 'Service Offline' : 'Checking Service...'}
                 </span>
               </div>
-            </motion.div>
-
-            {/* Stats */}
-            <motion.div
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, delay: 0.4 }}
-              className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-12"
-            >
-              {stats.map((stat, index) => (
-                <motion.div
-                  key={stat.label}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.6 + index * 0.1 }}
-                  className="glass rounded-xl p-6 hover-lift"
-                >
-                  <div className="flex flex-col items-center">
-                    <div className="p-3 rounded-lg bg-gradient-to-br from-white/10 to-white/5 mb-3">
-                      <stat.icon className={`h-6 w-6 ${stat.color}`} />
-                    </div>
-                    <div className="text-2xl font-bold text-white mb-1">{stat.value}</div>
-                    <div className="text-sm text-white/60">{stat.label}</div>
-                  </div>
-                </motion.div>
-              ))}
             </motion.div>
           </div>
         </div>
@@ -296,99 +269,24 @@ const HomePage = () => {
                   filename={analysisData.filename}
                 />
                 
-                <div className="mt-8 text-center">
+                <div className="mt-8 text-center space-y-4">
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    onClick={() => setCurrentStep(3)}
+                    onClick={handleFindJobs}
                     className="inline-flex items-center space-x-2 px-8 py-4 bg-gradient-to-r from-primary-500 to-accent-500 text-white rounded-xl font-semibold hover:shadow-lg transition-all duration-200"
                   >
                     <span>Find Matching Jobs</span>
                     <ArrowRight className="h-5 w-5" />
                   </motion.button>
+                  
+                  <div className="text-white/60 text-sm">
+                    We'll search for jobs that match your profile and skills
+                  </div>
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section className="py-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8 }}
-            className="text-center mb-16"
-          >
-            <h2 className="text-4xl font-bold text-white mb-4">Powerful Features</h2>
-            <p className="text-xl text-white/70 max-w-2xl mx-auto">
-              Everything you need to supercharge your job search with AI
-            </p>
-          </motion.div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {features.map((feature, index) => (
-              <motion.div
-                key={feature.title}
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: index * 0.1 }}
-                className="glass rounded-2xl p-6 hover-lift group"
-              >
-                <div className={`p-4 rounded-xl bg-gradient-to-br ${feature.color} mb-4 group-hover:scale-110 transition-transform duration-200`}>
-                  <feature.icon className="h-8 w-8 text-white" />
-                </div>
-                <h3 className="text-xl font-semibold text-white mb-3">{feature.title}</h3>
-                <p className="text-white/70 text-sm leading-relaxed">{feature.description}</p>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="py-20">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8 }}
-            className="glass rounded-3xl p-12"
-          >
-            <div className="flex justify-center mb-6">
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-                className="p-4 rounded-full bg-gradient-to-br from-primary-500 to-accent-500"
-              >
-                <Sparkles className="h-12 w-12 text-white" />
-              </motion.div>
-            </div>
-            
-            <h2 className="text-4xl font-bold text-white mb-6">
-              Ready to Transform Your Job Search?
-            </h2>
-            <p className="text-xl text-white/80 mb-8 max-w-2xl mx-auto">
-              Join thousands of professionals who have found their dream jobs 
-              with our AI-powered assistance. Your next career breakthrough awaits.
-            </p>
-            
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => {
-                document.querySelector('#fileInput')?.click();
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              className="inline-flex items-center space-x-3 px-8 py-4 bg-gradient-to-r from-primary-500 to-accent-500 text-white text-lg font-semibold rounded-xl hover:shadow-lg transition-all duration-200"
-            >
-              <Brain className="h-6 w-6" />
-              <span>Start Your Analysis</span>
-              <ArrowRight className="h-5 w-5" />
-            </motion.button>
-          </motion.div>
         </div>
       </section>
     </div>
