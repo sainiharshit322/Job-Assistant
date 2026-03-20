@@ -1,400 +1,301 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Brain,
-  TrendingUp,
-  Briefcase,
-  BookmarkCheck,
-  Users,
-  Target,
-  Sparkles,
-  FileText,
-  Search,
-  MessageSquare,
-  BarChart3,
-  Star,
-  Plus
+import React, { useState, useMemo } from 'react';
+import { motion } from 'framer-motion';
+import {
+  Brain, TrendingUp, Briefcase, BookmarkCheck,
+  Users, Target, Sparkles, FileText, Search,
+  MessageSquare, BarChart3, Star, Plus, Zap,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import StatsCard from '../components/StatsCard';
 import ActivityFeed from '../components/ActivityFeed';
 import JobRecommendations from '../components/JobRecommendations';
 import ProfileProgress from '../components/ProfileProgress';
-import toast from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
 
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap');
+  .dp-root { font-family: 'DM Sans', sans-serif; color: #f5f5f5; }
+  .dp-root .display { font-family: 'Bebas Neue', sans-serif; letter-spacing: .03em; }
+
+  .dp-card {
+    background: #ffffff06; border: 1px solid #ffffff10;
+    border-radius: 18px; padding: 24px; backdrop-filter: blur(24px);
+  }
+
+  .dp-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 12px; border-radius: 999px; font-size: 12px;
+    font-weight: 500; letter-spacing: .06em; text-transform: uppercase;
+  }
+  .dp-pill-lime  { background: #c6ff0018; color: #c6ff00; border: 1px solid #c6ff0030; }
+  .dp-pill-green { background: #22c55e18; color: #22c55e; border: 1px solid #22c55e30; }
+
+  .dp-select {
+    padding: 9px 14px; background: #ffffff08; border: 1px solid #ffffff14;
+    border-radius: 10px; color: #f5f5f5; font-family: 'DM Sans', sans-serif;
+    font-size: 13px; cursor: pointer; outline: none; appearance: none;
+  }
+  .dp-select option { background: #12121a; }
+
+  .dp-action-card {
+    background: #ffffff06; border: 1px solid #ffffff0d;
+    border-radius: 14px; padding: 20px; cursor: pointer;
+    transition: border-color .2s, background .2s, transform .15s;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .dp-action-card:hover { border-color: #c6ff0030; background: #c6ff0005; transform: translateY(-2px); }
+
+  .dp-btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 10px 20px; border-radius: 10px; font-size: 13px;
+    font-weight: 600; cursor: pointer; border: none;
+    font-family: 'DM Sans', sans-serif; transition: box-shadow .15s, transform .1s;
+  }
+  .dp-btn-lime { background: #c6ff00; color: #0a0a0f; }
+  .dp-btn-lime:hover { box-shadow: 0 0 24px #c6ff0050; transform: translateY(-1px); }
+
+  .dp-insight {
+    padding: 14px 16px; border-radius: 12px;
+    background: #ffffff05; border: 1px solid #ffffff0a;
+    transition: border-color .2s;
+  }
+  .dp-insight:hover { border-color: #ffffff16; }
+
+  .dp-bar-track { width: 100%; height: 5px; background: #ffffff0c; border-radius: 99px; overflow: hidden; }
+  .dp-bar-fill  { height: 100%; border-radius: 99px; background: linear-gradient(90deg, #c6ff00, #4f8aff); }
+
+  .dp-divider { height: 1px; background: #ffffff0c; }
+`;
+
+/* ─── static data ─────────────────────────────────────────────────── */
+const STATS = (d) => [
+  { title: 'Profile Strength', value: d.profileStrength, unit: '%', change: +5,  icon: Target,    color: 'from-blue-500 to-blue-600',     description: 'Profile completeness' },
+  { title: 'Jobs Applied',     value: d.jobsApplied,     unit: '',  change: +3,  icon: Briefcase, color: 'from-green-500 to-green-600',   description: 'This month' },
+  { title: 'Profile Views',    value: d.profileViews,    unit: '',  change: +12, icon: Users,     color: 'from-purple-500 to-purple-600', description: 'Last 30 days' },
+  { title: 'Avg Match Score',  value: d.avgMatchScore,   unit: '%', change: +8,  icon: TrendingUp, color: 'from-orange-500 to-orange-600', description: 'For viewed jobs' },
+];
+
+const QUICK_ACTIONS = (navigate) => [
+  { title: 'Upload Resume',     sub: 'Update with latest CV',          icon: FileText,     accent: '#4f8aff', action: () => navigate('/') },
+  { title: 'Search Jobs',       sub: 'Find your next opportunity',      icon: Search,       accent: '#22c55e', action: () => navigate('/jobs') },
+  { title: 'Practice Interview',sub: 'AI-generated mock questions',     icon: MessageSquare,accent: '#8b5cf6', action: () => toast('Interview practice coming soon!') },
+  { title: 'Skill Assessment',  sub: 'Test your technical skills',      icon: Brain,        accent: '#f97316', action: () => toast('Skill assessment coming soon!') },
+];
+
+const ACTIVITY = [
+  { id: 1, type: 'job_view',        title: 'Viewed Senior Developer at TechCorp', description: 'Match score: 85%',        timestamp: '2 hours ago',  icon: Briefcase,    color: 'text-blue-400' },
+  { id: 2, type: 'resume_analysis', title: 'Resume analysed successfully',         description: 'Found 15 technical skills',timestamp: '1 day ago',    icon: Brain,        color: 'text-green-400' },
+  { id: 3, type: 'job_save',        title: 'Saved Frontend Developer position',    description: 'At StartupX',              timestamp: '2 days ago',   icon: BookmarkCheck,color: 'text-purple-400' },
+  { id: 4, type: 'cover_letter',    title: 'Generated cover letter',               description: 'For React Developer role', timestamp: '3 days ago',   icon: MessageSquare,color: 'text-orange-400' },
+];
+
+/* stable random heights so bars don't re-randomise on every render */
+// const BAR_HEIGHTS = [62, 45, 78, 55, 88, 34, 70];
+// const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/* ═════════════════════════════════════════════════════════════════ */
 const DashboardPage = () => {
+  const navigate  = useNavigate();
   const [timeRange, setTimeRange] = useState('7d');
-  const [sessionId] = useState(localStorage.getItem('sessionId'));
-  const [savedJobs] = useState(JSON.parse(localStorage.getItem('savedJobs') || '[]'));
-  const [dashboardData, setDashboardData] = useState({
-    profileStrength: 75,
-    jobsApplied: 12,
-    jobsViewed: 48,
-    profileViews: 156,
-    responseRate: 25,
-    avgMatchScore: 82,
-    skillsIdentified: 15,
-    interviewsScheduled: 3
-  });
 
-  const [recentActivity, setRecentActivity] = useState([
-    {
-      id: 1,
-      type: 'job_view',
-      title: 'Viewed Senior Developer at TechCorp',
-      description: 'Match score: 85%',
-      timestamp: '2 hours ago',
-      icon: Briefcase,
-      color: 'text-blue-400'
-    },
-    {
-      id: 2,
-      type: 'resume_analysis',
-      title: 'Resume analyzed successfully',
-      description: 'Found 15 technical skills',
-      timestamp: '1 day ago',
-      icon: Brain,
-      color: 'text-green-400'
-    },
-    {
-      id: 3,
-      type: 'job_save',
-      title: 'Saved Frontend Developer position',
-      description: 'At StartupX',
-      timestamp: '2 days ago',
-      icon: BookmarkCheck,
-      color: 'text-purple-400'
-    },
-    {
-      id: 4,
-      type: 'cover_letter',
-      title: 'Generated cover letter',
-      description: 'For React Developer role',
-      timestamp: '3 days ago',
-      icon: MessageSquare,
-      color: 'text-orange-400'
-    }
-  ]);
+  // read from localStorage — keep as state so it's reactive
+  const sessionId = localStorage.getItem('sessionId');
+  // const savedJobs = useMemo(() => JSON.parse(localStorage.getItem('savedJobs') || '[]'), []);
 
-  const stats = [
-    {
-      title: 'Profile Strength',
-      value: dashboardData.profileStrength,
-      unit: '%',
-      change: +5,
-      icon: Target,
-      color: 'from-blue-500 to-blue-600',
-      description: 'Based on profile completeness'
-    },
-    {
-      title: 'Jobs Applied',
-      value: dashboardData.jobsApplied,
-      unit: '',
-      change: +3,
-      icon: Briefcase,
-      color: 'from-green-500 to-green-600',
-      description: 'This month'
-    },
-    {
-      title: 'Profile Views',
-      value: dashboardData.profileViews,
-      unit: '',
-      change: +12,
-      icon: Users,
-      color: 'from-purple-500 to-purple-600',
-      description: 'Last 30 days'
-    },
-    {
-      title: 'Avg Match Score',
-      value: dashboardData.avgMatchScore,
-      unit: '%',
-      change: +8,
-      icon: TrendingUp,
-      color: 'from-orange-500 to-orange-600',
-      description: 'For viewed jobs'
-    }
-  ];
+  const data = {
+    profileStrength: 75, jobsApplied: 12,
+    jobsViewed: 48, profileViews: 156,
+    responseRate: 25, avgMatchScore: 82,
+    skillsIdentified: 15, interviewsScheduled: 3,
+  };
 
-  const quickActions = [
-    {
-      title: 'Upload New Resume',
-      description: 'Update your profile with latest resume',
-      icon: FileText,
-      color: 'from-blue-500 to-purple-500',
-      action: () => window.location.href = '/'
-    },
-    {
-      title: 'Search Jobs',
-      description: 'Find your next opportunity',
-      icon: Search,
-      color: 'from-green-500 to-teal-500',
-      action: () => window.location.href = '/jobs'
-    },
-    {
-      title: 'Practice Interview',
-      description: 'Prepare with AI-generated questions',
-      icon: MessageSquare,
-      color: 'from-purple-500 to-pink-500',
-      action: () => toast.info('Interview practice coming soon!')
-    },
-    {
-      title: 'Skill Assessment',
-      description: 'Test your technical skills',
-      icon: Brain,
-      color: 'from-orange-500 to-red-500',
-      action: () => toast.info('Skill assessment coming soon!')
-    }
-  ];
+  const stats        = STATS(data);
+  const quickActions = QUICK_ACTIONS(navigate);
 
   return (
-    <div className="min-h-screen pt-20 pb-12">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
-        >
-          <div className="flex flex-col md:flex-row md:items-center justify-between mb-6">
-            <div>
-              <h1 className="text-4xl font-bold text-white mb-2">
-                Welcome back! 👋
-              </h1>
-              <p className="text-white/70 text-lg">
-                Here's your job search progress and recommendations
-              </p>
+    <>
+      <style>{css}</style>
+      <Toaster position="top-right" toastOptions={{
+        style: { background: '#1c1c2a', color: '#f5f5f5', border: '1px solid #ffffff14', fontFamily: 'DM Sans, sans-serif' }
+      }} />
+
+      <div className="dp-root" style={{ minHeight: '100vh', paddingTop: 80, paddingBottom: 80 }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 5%' }}>
+
+          {/* ── PAGE HEADER ── */}
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: 40 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 16 }}>
+              <div>
+                <span className="dp-pill dp-pill-lime" style={{ marginBottom: 12, display: 'inline-flex' }}>
+                  <Zap size={10} /> Dashboard
+                </span>
+                <h1 className="display" style={{ fontSize: 'clamp(36px, 5vw, 56px)', lineHeight: .95, color: '#f5f5f5' }}>
+                  Welcome back<span style={{ color: '#c6ff00' }}>.</span>
+                </h1>
+                <p style={{ fontSize: 15, color: '#888899', marginTop: 8 }}>Track your job search progress and next steps</p>
+              </div>
+
+              <div style={{ display: 'flex', align: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <select className="dp-select" value={timeRange} onChange={e => setTimeRange(e.target.value)}>
+                  <option value="7d">Last 7 days</option>
+                  <option value="30d">Last 30 days</option>
+                  <option value="90d">Last 90 days</option>
+                </select>
+                <button className="dp-btn dp-btn-lime">
+                  <Plus size={14} /> New Application
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-center space-x-4 mt-4 md:mt-0">
-              {/* Time Range Selector */}
-              <select
-                value={timeRange}
-                onChange={(e) => setTimeRange(e.target.value)}
-                className="px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-              >
-                <option value="7d" className="bg-gray-900">Last 7 days</option>
-                <option value="30d" className="bg-gray-900">Last 30 days</option>
-                <option value="90d" className="bg-gray-900">Last 90 days</option>
-              </select>
+            {sessionId && (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '7px 14px', background: '#22c55e10', border: '1px solid #22c55e25', borderRadius: 999 }}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', animation: 'ping 1.5s ease-in-out infinite' }} />
+                <span style={{ fontSize: 13, color: '#22c55e' }}>AI Assistant Active</span>
+                <Sparkles size={13} style={{ color: '#22c55e' }} />
+              </div>
+            )}
+          </motion.div>
 
-              <motion.button
-                className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-primary-500 to-accent-500 text-white rounded-lg font-medium"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <Plus className="h-4 w-4" />
-                <span>New Application</span>
-              </motion.button>
-            </div>
-          </div>
+          {/* ── STATS ROW ── */}
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .1 }}
+            style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 40 }}>
+            {stats.map((s, i) => (
+              <motion.div key={s.title} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .1 + i * .05 }}>
+                <StatsCard stat={s} />
+              </motion.div>
+            ))}
+          </motion.div>
 
-          {/* Session Status */}
-          {sessionId && (
-            <div className="flex items-center space-x-2 px-4 py-2 glass rounded-xl w-fit">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-              <span className="text-white/80 text-sm">AI Assistant Active</span>
-              <Sparkles className="h-4 w-4 text-primary-400" />
-            </div>
-          )}
-        </motion.div>
+          {/* ── MAIN GRID ── */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>
 
-        {/* Stats Grid */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8"
-        >
-          {stats.map((stat, index) => (
-            <motion.div
-              key={stat.title}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 + index * 0.05 }}
-            >
-              <StatsCard stat={stat} />
-            </motion.div>
-          ))}
-        </motion.div>
+            {/* LEFT COLUMN */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24, minWidth: 0 }}>
 
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left Column */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Quick Actions */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-            >
-              <h2 className="text-2xl font-bold text-white mb-4">Quick Actions</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {quickActions.map((action, index) => (
-                  <motion.div
-                    key={action.title}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.2 + index * 0.05 }}
-                    onClick={action.action}
-                    className="glass rounded-xl p-6 cursor-pointer hover-lift group"
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    <div className="flex items-center space-x-4">
-                      <div className={`p-3 rounded-xl bg-gradient-to-br ${action.color} group-hover:scale-110 transition-transform`}>
-                        <action.icon className="h-6 w-6 text-white" />
+              {/* quick actions */}
+              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .2 }}>
+                <h2 className="display" style={{ fontSize: 26, marginBottom: 16, color: '#f5f5f5' }}>Quick Actions</h2>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+                  {quickActions.map((qa, i) => {
+                    const Icon = qa.icon;
+                    return (
+                      <motion.div key={qa.title} className="dp-action-card"
+                        initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .2 + i * .05 }}
+                        onClick={qa.action} whileTap={{ scale: .97 }}>
+                        <div style={{ width: 42, height: 42, borderRadius: 12, background: `${qa.accent}18`, border: `1px solid ${qa.accent}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <Icon size={18} style={{ color: qa.accent }} />
+                        </div>
+                        <div>
+                          <p style={{ fontWeight: 600, fontSize: 14, color: '#e0e0ef', marginBottom: 2 }}>{qa.title}</p>
+                          <p style={{ fontSize: 12, color: '#888899' }}>{qa.sub}</p>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </motion.div>
+
+              {/* job recommendations */}
+              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .3 }}>
+                <JobRecommendations sessionId={sessionId} />
+              </motion.div>
+
+              {/* activity chart */}
+              {/* <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .4 }} className="dp-card">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+                  <h2 className="display" style={{ fontSize: 24, color: '#f5f5f5' }}>Activity Overview</h2>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <BarChart3 size={15} style={{ color: '#c6ff00' }} />
+                    <span style={{ fontSize: 12, color: '#888899' }}>Last 7 days</span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {DAYS.map((day, i) => {
+                    const pct = BAR_HEIGHTS[i];
+                    return (
+                      <div key={day} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span style={{ fontSize: 12, color: '#555566', width: 28, flexShrink: 0 }}>{day}</span>
+                        <div className="dp-bar-track" style={{ flex: 1 }}>
+                          <motion.div
+                            className="dp-bar-fill"
+                            initial={{ width: 0 }}
+                            animate={{ width: `${pct}%` }}
+                            transition={{ delay: .5 + i * .08, duration: .7, ease: 'easeOut' }}
+                          />
+                        </div>
+                        <span style={{ fontSize: 11, color: '#444455', width: 22, textAlign: 'right', flexShrink: 0 }}>
+                          {Math.round(pct / 10)}
+                        </span>
                       </div>
-                      <div>
-                        <h3 className="text-lg font-semibold text-white group-hover:text-primary-300 transition-colors">
-                          {action.title}
-                        </h3>
-                        <p className="text-white/70 text-sm">{action.description}</p>
+                    );
+                  })}
+                </div>
+              </motion.div> */}
+            </div>
+
+            {/* RIGHT COLUMN */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+              <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: .3 }}>
+                <ProfileProgress profileStrength={data.profileStrength} sessionId={sessionId} />
+              </motion.div>
+
+              <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: .4 }}>
+                <ActivityFeed activities={ACTIVITY} />
+              </motion.div>
+
+              {/* AI Insights */}
+              {/* <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: .5 }} className="dp-card">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 10, background: '#c6ff0018', border: '1px solid #c6ff0030', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Brain size={16} style={{ color: '#c6ff00' }} />
+                  </div>
+                  <h3 className="display" style={{ fontSize: 22, color: '#f5f5f5' }}>AI Insights</h3>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {[
+                    { icon: Star,        color: '#f59e0b', label: 'Top Skill',      text: 'React.js appears in 85% of your target jobs' },
+                    { icon: TrendingUp,  color: '#22c55e', label: 'Trending',       text: 'Full-stack roles are up 23% this month' },
+                    { icon: Target,      color: '#4f8aff', label: 'Recommendation', text: 'Add TypeScript to boost match scores by 15%' },
+                  ].map(({ icon: Icon, color, label, text }) => (
+                    <div key={label} className="dp-insight">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+                        <Icon size={13} style={{ color }} />
+                        <span style={{ fontSize: 12, fontWeight: 600, color, textTransform: 'uppercase', letterSpacing: '.06em' }}>{label}</span>
                       </div>
+                      <p style={{ fontSize: 13, color: '#aaaabc', lineHeight: 1.5 }}>{text}</p>
                     </div>
-                  </motion.div>
-                ))}
-              </div>
-            </motion.div>
-
-            {/* Job Recommendations */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-            >
-              <JobRecommendations sessionId={sessionId} />
-            </motion.div>
-
-            {/* Activity Chart */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
-              className="glass rounded-2xl p-6"
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-white">Activity Overview</h2>
-                <div className="flex items-center space-x-2">
-                  <BarChart3 className="h-5 w-5 text-primary-400" />
-                  <span className="text-white/60 text-sm">Last 7 days</span>
+                  ))}
                 </div>
-              </div>
+              </motion.div> */}
 
-              {/* Simple Chart Placeholder */}
-              <div className="space-y-4">
-                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => {
-                  const height = Math.random() * 100 + 20;
-                  return (
-                    <div key={day} className="flex items-center space-x-4">
-                      <span className="text-white/60 text-sm w-8">{day}</span>
-                      <div className="flex-1 bg-white/10 rounded-full h-6 overflow-hidden">
-                        <motion.div
-                          className="h-full bg-gradient-to-r from-primary-500 to-accent-500 rounded-full"
-                          initial={{ width: 0 }}
-                          animate={{ width: `${height}%` }}
-                          transition={{ delay: 0.5 + index * 0.1, duration: 0.8 }}
-                        />
-                      </div>
-                      <span className="text-white/40 text-xs w-8">{Math.round(height/10)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </motion.div>
+              {/* Saved jobs */}
+              {/* <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: .6 }} className="dp-card">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+                  <h3 className="display" style={{ fontSize: 22, color: '#f5f5f5' }}>Saved Jobs</h3>
+                  <BookmarkCheck size={16} style={{ color: '#888899' }} />
+                </div>
+                <div style={{ textAlign: 'center', padding: '8px 0 16px' }}>
+                  <div className="display" style={{ fontSize: 52, lineHeight: 1, color: '#f5f5f5' }}>{savedJobs.length}</div>
+                  <p style={{ fontSize: 13, color: '#888899', marginTop: 4, marginBottom: 20 }}>Jobs saved for later</p>
+                  <button className="dp-btn dp-btn-lime" style={{ width: '100%', justifyContent: 'center' }} onClick={() => navigate('/jobs')}>
+                    View All
+                  </button>
+                </div>
+              </motion.div> */}
+            </div>
           </div>
 
-          {/* Right Column */}
-          <div className="space-y-6">
-            {/* Profile Progress */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.3 }}
-            >
-              <ProfileProgress profileStrength={dashboardData.profileStrength} sessionId={sessionId} />
-            </motion.div>
-
-            {/* Activity Feed */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.4 }}
-            >
-              <ActivityFeed activities={recentActivity} />
-            </motion.div>
-
-            {/* AI Insights */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.5 }}
-              className="glass rounded-2xl p-6"
-            >
-              <div className="flex items-center space-x-2 mb-4">
-                <div className="p-2 rounded-lg bg-gradient-to-br from-primary-500 to-accent-500">
-                  <Brain className="h-5 w-5 text-white" />
-                </div>
-                <h3 className="text-lg font-semibold text-white">AI Insights</h3>
-              </div>
-
-              <div className="space-y-4">
-                <div className="p-4 bg-white/5 rounded-xl">
-                  <div className="flex items-center space-x-2 mb-2">
-                    <Star className="h-4 w-4 text-yellow-400" />
-                    <span className="text-white font-medium text-sm">Top Skill</span>
-                  </div>
-                  <p className="text-white/70 text-sm">React.js appears in 85% of your target jobs</p>
-                </div>
-
-                <div className="p-4 bg-white/5 rounded-xl">
-                  <div className="flex items-center space-x-2 mb-2">
-                    <TrendingUp className="h-4 w-4 text-green-400" />
-                    <span className="text-white font-medium text-sm">Trending</span>
-                  </div>
-                  <p className="text-white/70 text-sm">Full-stack roles are up 23% this month</p>
-                </div>
-
-                <div className="p-4 bg-white/5 rounded-xl">
-                  <div className="flex items-center space-x-2 mb-2">
-                    <Target className="h-4 w-4 text-blue-400" />
-                    <span className="text-white font-medium text-sm">Recommendation</span>
-                  </div>
-                  <p className="text-white/70 text-sm">Add TypeScript to boost match scores by 15%</p>
-                </div>
-              </div>
-            </motion.div>
-
-            {/* Saved Jobs Summary */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.6 }}
-              className="glass rounded-2xl p-6"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-white">Saved Jobs</h3>
-                <BookmarkCheck className="h-5 w-5 text-primary-400" />
-              </div>
-
-              <div className="text-center py-6">
-                <div className="text-3xl font-bold text-white mb-2">
-                  {savedJobs.length}
-                </div>
-                <p className="text-white/70 text-sm mb-4">Jobs saved for later</p>
-                
-                <motion.button
-                  onClick={() => window.location.href = '/jobs'}
-                  className="px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg text-sm transition-colors"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  View All
-                </motion.button>
-              </div>
-            </motion.div>
-          </div>
         </div>
       </div>
-    </div>
+
+      {/* responsive collapse right column */}
+      <style>{`
+        @media (max-width: 900px) {
+          .dp-root > div > div:last-child { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
+    </>
   );
 };
 
