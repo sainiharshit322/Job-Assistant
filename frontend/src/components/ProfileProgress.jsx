@@ -1,111 +1,132 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Target, CheckCircle, AlertCircle } from 'lucide-react';
+import { Target, CheckCircle, Circle, ArrowRight } from 'lucide-react';
 
-const ProfileProgress = ({ profileStrength, sessionId }) => {
-  const progressItems = [
-    { label: 'Resume Uploaded', completed: !!sessionId, points: 25 },
-    { label: 'Skills Analyzed', completed: !!sessionId, points: 20 },
-    { label: 'Job Preferences Set', completed: false, points: 15 },
-    { label: 'Portfolio Added', completed: false, points: 20 },
-    { label: 'Professional Photo', completed: false, points: 10 },
-    { label: 'Contact Info Verified', completed: false, points: 10 }
-  ];
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600&display=swap');
+  .pp-root { font-family: 'DM Sans', sans-serif; }
+  .pp-root .display { font-family: 'Bebas Neue', sans-serif; letter-spacing: .03em; }
 
-  const completedItems = progressItems.filter(item => item.completed);
-  const nextItem = progressItems.find(item => !item.completed);
+  .pp-card {
+    background: #ffffff06; border: 1px solid #ffffff10;
+    border-radius: 18px; padding: 24px; backdrop-filter: blur(24px);
+  }
+
+  .pp-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border-radius: 10px; transition: background .15s;
+  }
+  .pp-item:hover { background: #ffffff07; }
+
+  .pp-next {
+    padding: 14px 16px; border-radius: 12px;
+    background: #c6ff0010; border: 1px solid #c6ff0025;
+  }
+`;
+
+const PROGRESS_ITEMS = (sessionId) => [
+  { label: 'Resume Uploaded',       completed: !!sessionId, points: 25 },
+  { label: 'Skills Analyzed',       completed: !!sessionId, points: 20 },
+  { label: 'Job Preferences Set',   completed: false,       points: 15 },
+  { label: 'Portfolio Added',       completed: false,       points: 20 },
+  { label: 'Professional Photo',    completed: false,       points: 10 },
+  { label: 'Contact Info Verified', completed: false,       points: 10 },
+];
+
+const ProfileProgress = ({ profileStrength = 0, sessionId }) => {
+  const items   = PROGRESS_ITEMS(sessionId);
+  const nextItem = items.find(i => !i.completed);
+  const R = 52, C = 60, CIRC = 2 * Math.PI * R;
 
   return (
-    <div className="glass rounded-2xl p-6">
-      <div className="flex items-center space-x-2 mb-6">
-        <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500 to-purple-500">
-          <Target className="h-5 w-5 text-white" />
+    <>
+      <style>{css}</style>
+      <div className="pp-root pp-card">
+        {/* header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
+          <div style={{ width: 34, height: 34, borderRadius: 10, background: '#c6ff0018', border: '1px solid #c6ff0030', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Target size={16} style={{ color: '#c6ff00' }} />
+          </div>
+          <h3 className="display" style={{ fontSize: 22, color: '#f5f5f5' }}>Profile Strength</h3>
         </div>
-        <h3 className="text-lg font-semibold text-white">Profile Strength</h3>
-      </div>
 
-      {/* Progress Circle */}
-      <div className="flex items-center justify-center mb-6">
-        <div className="relative">
-          <svg className="w-32 h-32 transform -rotate-90">
-            <circle
-              cx="64"
-              cy="64"
-              r="56"
-              stroke="rgba(255,255,255,0.1)"
-              strokeWidth="8"
-              fill="none"
-            />
-            <motion.circle
-              cx="64"
-              cy="64"
-              r="56"
-              stroke="url(#gradient)"
-              strokeWidth="8"
-              fill="none"
-              strokeLinecap="round"
-              strokeDasharray={`${2 * Math.PI * 56}`}
-              initial={{ strokeDashoffset: 2 * Math.PI * 56 }}
-              animate={{ 
-                strokeDashoffset: 2 * Math.PI * 56 * (1 - profileStrength / 100) 
-              }}
-              transition={{ duration: 1, ease: "easeOut" }}
-            />
-            <defs>
-              <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#3b82f6" />
-                <stop offset="100%" stopColor="#8b5cf6" />
-              </linearGradient>
-            </defs>
-          </svg>
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-white">{profileStrength}%</div>
-              <div className="text-white/60 text-xs">Complete</div>
+        {/* circular progress — fixed SVG approach */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 28 }}>
+          <div style={{ position: 'relative', width: C * 2, height: C * 2 }}>
+            <svg width={C * 2} height={C * 2} style={{ transform: 'rotate(-90deg)' }}>
+              {/* track */}
+              <circle cx={C} cy={C} r={R} fill="none" stroke="#ffffff0f" strokeWidth={7} />
+              {/* fill */}
+              <motion.circle
+                cx={C} cy={C} r={R}
+                fill="none"
+                stroke="#c6ff00"
+                strokeWidth={7}
+                strokeLinecap="round"
+                strokeDasharray={CIRC}
+                initial={{ strokeDashoffset: CIRC }}
+                animate={{ strokeDashoffset: CIRC * (1 - profileStrength / 100) }}
+                transition={{ duration: 1.2, ease: 'easeOut' }}
+              />
+            </svg>
+            {/* center label */}
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+              <span className="display" style={{ fontSize: 32, lineHeight: 1, color: '#f5f5f5' }}>{profileStrength}</span>
+              <span style={{ fontSize: 11, color: '#888899', textTransform: 'uppercase', letterSpacing: '.08em' }}>%</span>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Progress Items */}
-      <div className="space-y-3 mb-6">
-        {progressItems.map((item, index) => (
-          <motion.div
-            key={item.label}
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: index * 0.1 }}
-            className="flex items-center justify-between"
-          >
-            <div className="flex items-center space-x-3">
-              {item.completed ? (
-                <CheckCircle className="h-4 w-4 text-green-400" />
-              ) : (
-                <AlertCircle className="h-4 w-4 text-white/40" />
-              )}
-              <span className={`text-sm ${
-                item.completed ? 'text-white' : 'text-white/60'
-              }`}>
-                {item.label}
+        {/* items list */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 16 }}>
+          {items.map((item, idx) => (
+            <motion.div
+              key={item.label}
+              initial={{ opacity: 0, x: -14 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: idx * 0.07 }}
+              className="pp-item"
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {item.completed
+                  ? <CheckCircle size={15} style={{ color: '#22c55e', flexShrink: 0 }} />
+                  : <Circle      size={15} style={{ color: '#333344', flexShrink: 0 }} />
+                }
+                <span style={{ fontSize: 13, fontWeight: 500, color: item.completed ? '#e0e0ef' : '#555566' }}>
+                  {item.label}
+                </span>
+              </div>
+              <span style={{
+                fontSize: 11, padding: '2px 8px', borderRadius: 999,
+                background: item.completed ? '#22c55e15' : '#ffffff08',
+                color:      item.completed ? '#22c55e'   : '#444455',
+                border:     `1px solid ${item.completed ? '#22c55e25' : '#ffffff0a'}`,
+              }}>
+                +{item.points}%
               </span>
-            </div>
-            <span className="text-xs text-white/40">+{item.points}%</span>
-          </motion.div>
-        ))}
-      </div>
-
-      {/* Next Action */}
-      {nextItem && (
-        <div className="p-3 bg-primary-500/10 border border-primary-500/20 rounded-lg">
-          <p className="text-primary-300 text-sm font-medium mb-1">
-            Next: {nextItem.label}
-          </p>
-          <p className="text-white/70 text-xs">
-            Complete this to gain +{nextItem.points}% profile strength
-          </p>
+            </motion.div>
+          ))}
         </div>
-      )}
-    </div>
+
+        {/* next action nudge */}
+        {nextItem && (
+          <div className="pp-next">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <p style={{ fontSize: 12, color: '#c6ff00', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>
+                  Next step
+                </p>
+                <p style={{ fontSize: 13, color: '#e0e0ef' }}>{nextItem.label}</p>
+                <p style={{ fontSize: 11, color: '#888899', marginTop: 2 }}>
+                  +{nextItem.points}% profile strength
+                </p>
+              </div>
+              <ArrowRight size={16} style={{ color: '#c6ff00', flexShrink: 0 }} />
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 };
 
