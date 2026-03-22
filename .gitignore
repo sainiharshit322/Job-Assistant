@@ -31,6 +31,7 @@ package-lock.json
 .pnp/
 .pnp.js
 
+model/
 dist/
 build/
 .cache/
