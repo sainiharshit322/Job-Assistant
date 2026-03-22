@@ -1,18 +1,24 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
-// import Footer from './components/Footer';
 import HomePage from './pages/HomePage';
 import JobsPage from './pages/JobsPage';
 import DashboardPage from './pages/DashboardPage';
+import { clearSession } from './utils/session';
 import './index.css';
 
 function App() {
+  useEffect(() => {
+    const handleUnload = () => clearSession();
+    window.addEventListener('beforeunload', handleUnload);
+    return () => window.removeEventListener('beforeunload', handleUnload);
+  }, []);
+
   return (
     <Router>
       <div style={{
         minHeight: '100vh',
-        background: '#0a0a0f',  /* --ink: matches HomePage exactly */
+        background: '#0a0a0f',
         backgroundImage: `
           radial-gradient(ellipse 80% 50% at 10% -10%, #c6ff0009 0%, transparent 60%),
           radial-gradient(ellipse 60% 40% at 90% 110%, #4f8aff08 0%, transparent 60%)
@@ -27,7 +33,6 @@ function App() {
             <Route path="/jobs"      element={<JobsPage />} />
           </Routes>
         </main>
-        {/* <Footer /> */}
       </div>
     </Router>
   );
