@@ -1,395 +1,321 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Search, 
-  MapPin, 
-  SlidersHorizontal,
-  Briefcase,
-  Brain,
-  AlertCircle,
-  RefreshCw
+import {
+  Search, MapPin, SlidersHorizontal, Briefcase,
+  Brain, AlertCircle, RefreshCw, ArrowRight, Zap,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import JobCard from '../components/JobCard';
 import JobFilters from '../components/JobFilters';
 import JobDetails from '../components/JobDetails';
 import { jobAssistantAPI } from '../services/api';
-import toast from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
+
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap');
+  .jp-root { font-family: 'DM Sans', sans-serif; color: #f5f5f5; }
+  .jp-root .display { font-family: 'Bebas Neue', sans-serif; letter-spacing: .03em; }
+
+  .jp-input {
+    width: 100%; padding: 12px 16px 12px 44px;
+    background: #ffffff08; border: 1px solid #ffffff14;
+    border-radius: 12px; color: #f5f5f5; font-family: 'DM Sans', sans-serif;
+    font-size: 14px; outline: none; transition: border-color .2s;
+  }
+  .jp-input::placeholder { color: #555566; }
+  .jp-input:focus { border-color: #c6ff0050; }
+
+  .jp-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 22px; border-radius: 12px; font-size: 14px;
+    font-weight: 600; cursor: pointer; border: none; transition: box-shadow .15s, transform .1s;
+    font-family: 'DM Sans', sans-serif; white-space: nowrap;
+  }
+  .jp-btn-lime  { background: #c6ff00; color: #0a0a0f; }
+  .jp-btn-lime:hover:not(:disabled) { box-shadow: 0 0 24px #c6ff0055; transform: translateY(-1px); }
+  .jp-btn-lime:disabled { opacity: .5; cursor: not-allowed; }
+  .jp-btn-ghost { background: #ffffff0a; color: #f5f5f5; border: 1px solid #ffffff14; }
+  .jp-btn-ghost:hover { background: #ffffff12; }
+
+  .jp-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 12px; border-radius: 999px; font-size: 12px;
+    font-weight: 500; letter-spacing: .06em; text-transform: uppercase;
+  }
+  .jp-pill-green { background: #22c55e18; color: #22c55e; border: 1px solid #22c55e30; }
+  .jp-pill-lime  { background: #c6ff0018; color: #c6ff00; border: 1px solid #c6ff0030; }
+
+  .jp-card {
+    background: #ffffff06; border: 1px solid #ffffff10;
+    border-radius: 18px; backdrop-filter: blur(24px);
+  }
+
+  .jp-skeleton {
+    background: linear-gradient(90deg, #ffffff06 25%, #ffffff0e 50%, #ffffff06 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 10px;
+  }
+  @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+  @keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+  .spin { animation: spin .9s linear infinite; }
+`;
 
 const JobsPage = () => {
-  const [jobs, setJobs] = useState([]);
-  const [filteredJobs, setFilteredJobs] = useState([]);
-  const [selectedJob, setSelectedJob] = useState(null);
-  const [showFilters, setShowFilters] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [location, setLocation] = useState('');
-  const [sessionId, setSessionId] = useState(localStorage.getItem('sessionId'));
+  const navigate = useNavigate();
+  const [jobs,          setJobs]          = useState([]);
+  const [filteredJobs,  setFilteredJobs]  = useState([]);
+  const [selectedJob,   setSelectedJob]   = useState(null);
+  const [showFilters,   setShowFilters]   = useState(false);
+  const [isLoading,     setIsLoading]     = useState(false);
+  const [searchQuery,   setSearchQuery]   = useState('');
+  const [locationVal,   setLocationVal]   = useState('');
+  const [sessionId]                       = useState(localStorage.getItem('sessionId'));
   const [matchAnalysis, setMatchAnalysis] = useState({});
-  const [savedJobs, setSavedJobs] = useState(new Set());
-  
-  const [filters, setFilters] = useState({
-    jobType: '',
-    experienceLevel: '',
-    salaryMin: '',
-    salaryMax: '',
-    remote: false,
-    sortBy: 'relevance'
+  const [savedJobs,     setSavedJobs]     = useState(new Set());
+  const [filters,       setFilters]       = useState({
+    jobType: '', experienceLevel: '', salaryMin: '', salaryMax: '', remote: false, sortBy: 'relevance',
   });
 
-useEffect(() => {
-  // Auto-search when coming from homepage
-  const shouldAutoSearch = localStorage.getItem('autoSearch');
-  const defaultQuery = localStorage.getItem('defaultSearchQuery');
-  
-  if (shouldAutoSearch === 'true' && sessionId && defaultQuery) {
-    setSearchQuery(defaultQuery);
-    // Clear the flags
-    localStorage.removeItem('autoSearch');
-    localStorage.removeItem('defaultSearchQuery');
-    
-    // Trigger search automatically
-    handleSearchWithQuery(defaultQuery);
-  }
-}, [sessionId]);
-
-// Add this helper function before the return statement
-const handleSearchWithQuery = async (query) => {
-  if (!sessionId) {
-    toast.error('Please upload your resume first to search for jobs');
-    return;
-  }
-
-  if (!query.trim()) {
-    toast.error('Please enter a search query');
-    return;
-  }
-
-  setIsLoading(true);
-  try {
-    const response = await jobAssistantAPI.searchJobs(sessionId, query);
-    
-    if (response.data.success) {
-      setJobs(response.data.jobs);
-      setFilteredJobs(response.data.jobs);
-      setLocation(response.data.location);
-      toast.success(`Found ${response.data.jobs.length} jobs matching your profile!`);
-    }
-  } catch (error) {
-    console.error('Search error:', error);
-    toast.error(error.response?.data?.error || 'Failed to search jobs');
-  } finally {
-    setIsLoading(false);
-  }
-};
-
-
+  /* ── load saved jobs ── */
   useEffect(() => {
-    // Load saved jobs from localStorage
     const saved = JSON.parse(localStorage.getItem('savedJobs') || '[]');
     setSavedJobs(new Set(saved));
   }, []);
 
-  const handleSearch = async () => {
-    if (!sessionId) {
-      toast.error('Please upload your resume first to search for jobs');
-      return;
+  /* ── auto-search from homepage ── */
+  useEffect(() => {
+    const should = localStorage.getItem('autoSearch');
+    const query  = localStorage.getItem('defaultSearchQuery');
+    if (should === 'true' && sessionId && query) {
+      setSearchQuery(query);
+      localStorage.removeItem('autoSearch');
+      localStorage.removeItem('defaultSearchQuery');
+      runSearch(query);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
 
-    if (!searchQuery.trim()) {
-      toast.error('Please enter a search query');
-      return;
-    }
+  /* ── filter side-effect ── */
+  useEffect(() => { applyFilters(); }, [filters, jobs]);
 
+  /* ── search ── */
+  const runSearch = async (q = searchQuery) => {
+    if (!sessionId) { toast.error('Please upload your resume first'); return; }
+    if (!q.trim())  { toast.error('Please enter a search query');     return; }
     setIsLoading(true);
     try {
-      const response = await jobAssistantAPI.searchJobs(sessionId, searchQuery);
-      
-      if (response.data.success) {
-        setJobs(response.data.jobs);
-        setFilteredJobs(response.data.jobs);
-        setLocation(response.data.location);
-        toast.success(`Found ${response.data.jobs.length} jobs`);
+      const res = await jobAssistantAPI.searchJobs(sessionId, q);
+      if (res.data.success) {
+        setJobs(res.data.jobs);
+        setFilteredJobs(res.data.jobs);
+        setLocationVal(res.data.location || '');
+        toast.success(`Found ${res.data.jobs.length} jobs matching your profile!`);
       }
-    } catch (error) {
-      console.error('Search error:', error);
-      toast.error(error.response?.data?.error || 'Failed to search jobs');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to search jobs');
     } finally {
       setIsLoading(false);
     }
   };
 
+  /* ── job select + match analysis ── */
   const handleJobSelect = async (job) => {
     setSelectedJob(job);
-    
-    // Get match analysis if we have a session
-    if (sessionId) {
+    if (sessionId && !matchAnalysis[job.id]) {
       try {
-        const response = await jobAssistantAPI.analyzeMatch(sessionId, job.id);
-        if (response.data.success) {
-          setMatchAnalysis({
-            ...matchAnalysis,
-            [job.id]: {
-              score: response.data.match_score,
-              analysis: response.data.match_analysis
-            }
-          });
+        const res = await jobAssistantAPI.analyzeMatch(sessionId, job.id);
+        if (res.data.success) {
+          setMatchAnalysis(prev => ({
+            ...prev,
+            [job.id]: { score: res.data.match_score, analysis: res.data.match_analysis },
+          }));
         }
-      } catch (error) {
-        console.error('Match analysis error:', error);
-      }
+      } catch { /* silent */ }
     }
   };
 
+  /* ── save toggle ── */
   const handleSaveJob = (jobId) => {
-    const newSavedJobs = new Set(savedJobs);
-    if (savedJobs.has(jobId)) {
-      newSavedJobs.delete(jobId);
-      toast.success('Job removed from saved list');
-    } else {
-      newSavedJobs.add(jobId);
-      toast.success('Job saved successfully');
-    }
-    setSavedJobs(newSavedJobs);
-    localStorage.setItem('savedJobs', JSON.stringify([...newSavedJobs]));
+    const next = new Set(savedJobs);
+    if (next.has(jobId)) { next.delete(jobId); toast.success('Removed from saved'); }
+    else                 { next.add(jobId);    toast.success('Job saved!'); }
+    setSavedJobs(next);
+    localStorage.setItem('savedJobs', JSON.stringify([...next]));
   };
 
+  /* ── filters ── */
   const applyFilters = () => {
-    let filtered = [...jobs];
-
-    if (filters.jobType) {
-      filtered = filtered.filter(job => 
-        job.contract_type.toLowerCase().includes(filters.jobType.toLowerCase())
-      );
-    }
-
-    if (filters.salaryMin) {
-      filtered = filtered.filter(job => 
-        !job.salary_min || job.salary_min >= parseInt(filters.salaryMin)
-      );
-    }
-
-    if (filters.salaryMax) {
-      filtered = filtered.filter(job => 
-        !job.salary_max || job.salary_max <= parseInt(filters.salaryMax)
-      );
-    }
-
-    if (filters.remote) {
-      filtered = filtered.filter(job => 
-        job.location.toLowerCase().includes('remote') || 
-        job.contract_type.toLowerCase().includes('remote')
-      );
-    }
-
-    // Sort jobs
-    if (filters.sortBy === 'salary_high') {
-      filtered.sort((a, b) => (b.salary_max || 0) - (a.salary_max || 0));
-    } else if (filters.sortBy === 'salary_low') {
-      filtered.sort((a, b) => (a.salary_min || 0) - (b.salary_min || 0));
-    } else if (filters.sortBy === 'date') {
-      filtered.sort((a, b) => new Date(b.posted_date) - new Date(a.posted_date));
-    }
-
-    setFilteredJobs(filtered);
+    let f = [...jobs];
+    if (filters.jobType)  f = f.filter(j => j.contract_type?.toLowerCase().includes(filters.jobType.toLowerCase()));
+    if (filters.salaryMin) f = f.filter(j => !j.salary_min || j.salary_min >= parseInt(filters.salaryMin));
+    if (filters.salaryMax) f = f.filter(j => !j.salary_max || j.salary_max <= parseInt(filters.salaryMax));
+    if (filters.remote)    f = f.filter(j => j.location?.toLowerCase().includes('remote') || j.contract_type?.toLowerCase().includes('remote'));
+    if (filters.sortBy === 'salary_high') f.sort((a, b) => (b.salary_max || 0) - (a.salary_max || 0));
+    if (filters.sortBy === 'salary_low')  f.sort((a, b) => (a.salary_min || 0) - (b.salary_min || 0));
+    if (filters.sortBy === 'date')        f.sort((a, b) => new Date(b.posted_date) - new Date(a.posted_date));
+    setFilteredJobs(f);
   };
 
-  useEffect(() => {
-    applyFilters();
-  }, [filters, jobs]);
+  const resetFilters = () => setFilters({ jobType: '', experienceLevel: '', salaryMin: '', salaryMax: '', remote: false, sortBy: 'relevance' });
 
   return (
-    <div className="min-h-screen pt-20 pb-12">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
-        >
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-4xl font-bold text-white mb-2">Find Your Dream Job</h1>
-              <p className="text-white/70 text-lg">
-                {jobs.length > 0 ? `${filteredJobs.length} jobs found` : 'Search for jobs tailored to your profile'}
-              </p>
-            </div>
-            
-            {sessionId && (
-              <div className="flex items-center space-x-2 px-4 py-2 glass rounded-xl">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                <span className="text-white/80 text-sm">Resume Analyzed</span>
-              </div>
-            )}
-          </div>
+    <>
+      <style>{css}</style>
+      <Toaster position="top-right" toastOptions={{ style: { background: '#1c1c2a', color: '#f5f5f5', border: '1px solid #ffffff14', fontFamily: 'DM Sans, sans-serif' } }} />
 
-          {/* Search Bar */}
-          <div className="glass rounded-2xl p-6">
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1 relative">
-                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-white/50 h-5 w-5" />
-                <input
-                  type="text"
-                  placeholder="Job title, skills, or company"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                  className="w-full pl-12 pr-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                />
-              </div>
-              
-              <div className="relative">
-                <MapPin className="absolute left-4 top-1/2 transform -translate-y-1/2 text-white/50 h-5 w-5" />
-                <input
-                  type="text"
-                  placeholder="Location"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  className="w-full md:w-64 pl-12 pr-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                />
-              </div>
+      <div className="jp-root" style={{ minHeight: '100vh', paddingTop: 80, paddingBottom: 80 }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 5%' }}>
 
-              <div className="flex gap-2">
-                <motion.button
-                  onClick={() => setShowFilters(!showFilters)}
-                  className="flex items-center space-x-2 px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-colors"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <SlidersHorizontal className="h-5 w-5" />
-                  <span className="hidden sm:block">Filters</span>
-                </motion.button>
-
-                <motion.button
-                  onClick={handleSearch}
-                  disabled={isLoading}
-                  className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-primary-500 to-accent-500 hover:from-primary-600 hover:to-accent-600 text-white rounded-xl font-medium transition-colors disabled:opacity-50"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  {isLoading ? (
-                    <RefreshCw className="h-5 w-5 animate-spin" />
-                  ) : (
-                    <Search className="h-5 w-5" />
-                  )}
-                  <span>Search</span>
-                </motion.button>
+          {/* ── HEADER ── */}
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: 32 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
+              <div>
+                <span className="jp-pill jp-pill-lime" style={{ marginBottom: 12, display: 'inline-flex' }}>
+                  <Zap size={10} /> Job Search
+                </span>
+                <h1 className="display" style={{ fontSize: 'clamp(36px, 5vw, 64px)', lineHeight: .92, color: '#f5f5f5' }}>
+                  Find Your<br /><span style={{ color: '#c6ff00' }}>Dream Role.</span>
+                </h1>
+                <p style={{ fontSize: 14, color: '#888899', marginTop: 10 }}>
+                  {jobs.length > 0
+                    ? `${filteredJobs.length} of ${jobs.length} jobs shown`
+                    : 'Search jobs tailored to your resume profile'}
+                </p>
               </div>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Filters */}
-        <AnimatePresence>
-          {showFilters && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mb-6"
-            >
-              <JobFilters filters={filters} setFilters={setFilters} />
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Jobs List */}
-          <div className="lg:col-span-2 space-y-4">
-            {isLoading ? (
-              <div className="space-y-4">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="glass rounded-xl p-6 animate-pulse">
-                    <div className="h-4 bg-white/20 rounded w-3/4 mb-3" />
-                    <div className="h-3 bg-white/10 rounded w-1/2 mb-2" />
-                    <div className="h-3 bg-white/10 rounded w-2/3" />
-                  </div>
-                ))}
-              </div>
-            ) : filteredJobs.length > 0 ? (
-              <AnimatePresence>
-                {filteredJobs.map((job, index) => (
-                  <motion.div
-                    key={job.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
-                    transition={{ delay: index * 0.1 }}
-                  >
-                    <JobCard
-                      job={job}
-                      isSelected={selectedJob?.id === job.id}
-                      isSaved={savedJobs.has(job.id)}
-                      matchScore={matchAnalysis[job.id]?.score}
-                      onSelect={() => handleJobSelect(job)}
-                      onSave={() => handleSaveJob(job.id)}
-                      sessionId={sessionId}
-                    />
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            ) : jobs.length === 0 ? (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="glass rounded-2xl p-12 text-center"
-              >
-                <div className="mb-6">
-                  <div className="p-4 rounded-full bg-primary-500/20 inline-block mb-4">
-                    <Search className="h-12 w-12 text-primary-400" />
-                  </div>
-                  <h3 className="text-2xl font-bold text-white mb-2">Ready to Find Your Next Role?</h3>
-                  <p className="text-white/70">
-                    {sessionId 
-                      ? 'Enter a job title or skill to start searching for personalized job matches'
-                      : 'Upload your resume first to get AI-powered job recommendations'
-                    }
-                  </p>
+              {sessionId && (
+                <div className="jp-pill jp-pill-green">
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
+                  Resume Analysed
                 </div>
-                
-                {!sessionId && (
-                  <motion.button
-                    onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-                    className="inline-flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-primary-500 to-accent-500 text-white rounded-xl font-medium"
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                  >
-                    <Brain className="h-5 w-5" />
-                    <span>Upload Resume</span>
-                  </motion.button>
-                )}
-              </motion.div>
-            ) : (
+              )}
+            </div>
+
+            {/* ── SEARCH BAR ── */}
+            <div className="jp-card" style={{ padding: 20 }}>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                {/* query */}
+                <div style={{ flex: '1 1 200px', position: 'relative', minWidth: 0 }}>
+                  <Search size={16} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: '#555566', pointerEvents: 'none' }} />
+                  <input
+                    className="jp-input"
+                    type="text"
+                    placeholder="Job title, skills, or company"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && runSearch()}
+                  />
+                </div>
+
+                {/* location */}
+                <div style={{ flex: '0 1 200px', position: 'relative' }}>
+                  <MapPin size={16} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: '#555566', pointerEvents: 'none' }} />
+                  <input
+                    className="jp-input"
+                    type="text"
+                    placeholder="Location"
+                    value={locationVal}
+                    onChange={e => setLocationVal(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && runSearch()}
+                  />
+                </div>
+
+                {/* buttons */}
+                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                  <button className="jp-btn jp-btn-ghost" onClick={() => setShowFilters(s => !s)}>
+                    <SlidersHorizontal size={15} />
+                    <span>Filters {showFilters ? '▲' : '▼'}</span>
+                  </button>
+                  <button className="jp-btn jp-btn-lime" onClick={() => runSearch()} disabled={isLoading}>
+                    {isLoading ? <RefreshCw size={15} className="spin" /> : <Search size={15} />}
+                    Search
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* ── FILTERS ── */}
+          <AnimatePresence>
+            {showFilters && (
               <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="glass rounded-2xl p-8 text-center"
+                initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }} style={{ marginBottom: 20, overflow: 'hidden' }}
               >
-                <AlertCircle className="h-12 w-12 text-orange-400 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-white mb-2">No jobs match your filters</h3>
-                <p className="text-white/70 mb-4">Try adjusting your search criteria or filters</p>
-                <motion.button
-                  onClick={() => setFilters({
-                    jobType: '',
-                    experienceLevel: '',
-                    salaryMin: '',
-                    salaryMax: '',
-                    remote: false,
-                    sortBy: 'relevance'
-                  })}
-                  className="px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg transition-colors"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  Clear Filters
-                </motion.button>
+                <JobFilters filters={filters} setFilters={setFilters} />
               </motion.div>
             )}
-          </div>
+          </AnimatePresence>
 
-          {/* Job Details */}
-          <div className="lg:col-span-1">
-            <div className="sticky top-24">
+          {/* ── MAIN GRID ── */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 20, alignItems: 'start' }}>
+
+            {/* LEFT — job list */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {isLoading ? (
+                [...Array(5)].map((_, i) => (
+                  <div key={i} className="jp-card" style={{ padding: 24 }}>
+                    <div className="jp-skeleton" style={{ height: 18, width: '70%', marginBottom: 12 }} />
+                    <div className="jp-skeleton" style={{ height: 13, width: '40%', marginBottom: 10 }} />
+                    <div className="jp-skeleton" style={{ height: 13, width: '55%' }} />
+                  </div>
+                ))
+              ) : filteredJobs.length > 0 ? (
+                <AnimatePresence>
+                  {filteredJobs.map((job, idx) => (
+                    <motion.div
+                      key={job.id}
+                      initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -16 }} transition={{ delay: idx * 0.05 }}
+                    >
+                      <JobCard
+                        job={job}
+                        isSelected={selectedJob?.id === job.id}
+                        isSaved={savedJobs.has(job.id)}
+                        matchScore={matchAnalysis[job.id]?.score}
+                        onSelect={() => handleJobSelect(job)}
+                        onSave={() => handleSaveJob(job.id)}
+                        sessionId={sessionId}
+                      />
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              ) : jobs.length === 0 ? (
+                /* empty state */
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="jp-card"
+                  style={{ padding: 64, textAlign: 'center' }}>
+                  <div style={{ width: 72, height: 72, borderRadius: 20, background: '#c6ff0015', border: '1px solid #c6ff0025', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px' }}>
+                    <Search size={32} style={{ color: '#c6ff00' }} />
+                  </div>
+                  <h3 className="display" style={{ fontSize: 32, marginBottom: 10 }}>
+                    {sessionId ? 'Start Your Search' : 'Upload Resume First'}
+                  </h3>
+                  <p style={{ fontSize: 14, color: '#888899', marginBottom: 28, maxWidth: 340, margin: '0 auto 28px' }}>
+                    {sessionId
+                      ? 'Enter a job title or skill above to get AI-powered matches'
+                      : 'Your resume is needed to get personalised job recommendations'}
+                  </p>
+                  {!sessionId && (
+                    <button className="jp-btn jp-btn-lime" onClick={() => navigate('/')}>
+                      <Brain size={15} /> Upload Resume <ArrowRight size={13} />
+                    </button>
+                  )}
+                </motion.div>
+              ) : (
+                /* no filter results */
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="jp-card"
+                  style={{ padding: 48, textAlign: 'center' }}>
+                  <AlertCircle size={40} style={{ color: '#f59e0b', margin: '0 auto 16px' }} />
+                  <h3 className="display" style={{ fontSize: 26, marginBottom: 8 }}>No Results</h3>
+                  <p style={{ fontSize: 14, color: '#888899', marginBottom: 24 }}>Try adjusting or clearing your filters</p>
+                  <button className="jp-btn jp-btn-ghost" onClick={resetFilters}>Clear Filters</button>
+                </motion.div>
+              )}
+            </div>
+
+            {/* RIGHT — job details */}
+            <div style={{ position: 'sticky', top: 84 }}>
               {selectedJob ? (
                 <JobDetails
                   job={selectedJob}
@@ -399,25 +325,24 @@ const handleSearchWithQuery = async (query) => {
                   onSave={() => handleSaveJob(selectedJob.id)}
                 />
               ) : (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="glass rounded-2xl p-8 text-center"
-                >
-                  <div className="p-4 rounded-full bg-white/10 inline-block mb-4">
-                    <Briefcase className="h-8 w-8 text-white/50" />
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="jp-card"
+                  style={{ padding: 48, textAlign: 'center' }}>
+                  <div style={{ width: 60, height: 60, borderRadius: 16, background: '#ffffff08', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
+                    <Briefcase size={26} style={{ color: '#333344' }} />
                   </div>
-                  <h3 className="text-lg font-semibold text-white mb-2">Select a Job</h3>
-                  <p className="text-white/70 text-sm">
-                    Click on a job from the list to view details and get AI-powered match analysis
-                  </p>
+                  <h3 className="display" style={{ fontSize: 24, marginBottom: 8 }}>Select a Job</h3>
+                  <p style={{ fontSize: 13, color: '#888899' }}>Click any listing to view details, AI match score, cover letter and interview tips</p>
                 </motion.div>
               )}
             </div>
+
           </div>
         </div>
       </div>
-    </div>
+
+      {/* responsive collapse */}
+      <style>{`@media(max-width:900px){.jp-root > div > div:last-child{grid-template-columns:1fr !important;}}`}</style>
+    </>
   );
 };
 
