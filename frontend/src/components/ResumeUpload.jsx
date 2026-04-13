@@ -16,6 +16,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { jobAssistantAPI } from '../services/api';
+import { saveSession } from '../utils/session';
 import toast from 'react-hot-toast';
 
 /* ─── inline styles for this component only ─────────────────────── */
@@ -92,19 +93,25 @@ const FEATURES = [
 ];
 
 /* ─── LOADING MESSAGES ──────────────────────────────────────────── */
-const MSGS = [
+// Phase 1 (fast): actual HTTP file upload progress
+const UPLOAD_MSGS = ['Uploading your CV…', 'Sending to AI engine…'];
+// Phase 2 (slow, 1-3 min): backend running AI analysis
+const ANALYSIS_MSGS = [
   'Extracting skills & experience…',
   'Scoring ATS compatibility…',
   'Mapping market positioning…',
   'Building your talent profile…',
+  'Cross-referencing 2026 job market…',
+  'Almost there — finalising your profile…',
 ];
 
 /* ═══════════════════════════════════════════════════════════════════ */
-const ResumeUpload = ({ onAnalysisComplete }) => {
+const ResumeUpload = ({ onAnalysisComplete, onRemove }) => {
   const [drag,     setDrag]     = useState(false);
   const [file,     setFile]     = useState(null);
   const [loading,  setLoading]  = useState(false);
   const [progress, setProgress] = useState(0);
+  const [phase,    setPhase]    = useState('upload'); // 'upload' | 'analysis'
   const [msgIdx,   setMsgIdx]   = useState(0);
   const [done,     setDone]     = useState(false);
   const [error,    setError]    = useState(null);
@@ -129,17 +136,45 @@ const ResumeUpload = ({ onAnalysisComplete }) => {
 
   const upload = async (f) => {
     setLoading(true); setProgress(0); setDone(false);
+    setPhase('upload'); setMsgIdx(0);
 
-    // rotating messages
+    // Phase 1 timer — cycles through upload messages while file transfers
     let mi = 0;
-    const msgTimer = setInterval(() => { mi = (mi + 1) % MSGS.length; setMsgIdx(mi); }, 2200);
-
-    // fake progress
-    const prog = setInterval(() => setProgress(p => p >= 88 ? p : p + 8), 220);
+    const uploadMsgTimer = setInterval(() => {
+      mi = (mi + 1) % UPLOAD_MSGS.length;
+      setMsgIdx(mi);
+    }, 1500);
 
     try {
-      const res = await jobAssistantAPI.uploadResume(f);
-      clearInterval(prog); clearInterval(msgTimer);
+      const res = await jobAssistantAPI.uploadResume(f, (uploadPct) => {
+        // Real upload progress lives in 0–40% of the bar
+        setProgress(Math.round(uploadPct * 0.4));
+
+        // Once file transfer is done (100%), switch to analysis phase
+        if (uploadPct === 100) {
+          clearInterval(uploadMsgTimer);
+          setPhase('analysis');
+          setMsgIdx(0);
+
+          // Phase 2: slow-crawl the remaining 40–95% while AI analyses
+          let analysisMi = 0;
+          const analysisInterval = setInterval(() => {
+            setProgress(p => {
+              if (p >= 95) { clearInterval(analysisInterval); return p; }
+              return p + 1;
+            });
+            analysisMi = (analysisMi + 1) % ANALYSIS_MSGS.length;
+            setMsgIdx(analysisMi);
+          }, 2500); // tick every 2.5s → reaches 95% in ~2.2 min
+
+          // Store so we can clear on success/error
+          f._analysisInterval = analysisInterval;
+        }
+      });
+
+      // Done — clear any lingering interval
+      if (f._analysisInterval) clearInterval(f._analysisInterval);
+      clearInterval(uploadMsgTimer);
       setProgress(100); setDone(true);
 
       if (res.data.success) {
@@ -151,12 +186,15 @@ const ResumeUpload = ({ onAnalysisComplete }) => {
         });
       }
     } catch (err) {
-      clearInterval(prog); clearInterval(msgTimer);
-      const msg = err.response?.data?.error || 'Upload failed';
-      setError(msg); toast.error(msg);
+      if (f._analysisInterval) clearInterval(f._analysisInterval);
+      clearInterval(uploadMsgTimer);
+      // Use our normalised message from the interceptor if available
+      const msg = err.userMessage || err.response?.data?.error || 'Upload failed. Please try again.';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
-      setTimeout(() => setProgress(0), 800);
+      setTimeout(() => setProgress(0), 1000);
     }
   };
 
@@ -235,13 +273,32 @@ const ResumeUpload = ({ onAnalysisComplete }) => {
               {/* progress */}
               {loading && (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ maxWidth: 360, margin: '0 auto', textAlign: 'left' }}>
+                  {/* phase label */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <span style={{
+                      fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
+                      textTransform: 'uppercase', letterSpacing: '.08em',
+                      background: phase === 'upload' ? '#4f8aff18' : '#c6ff0018',
+                      color:      phase === 'upload' ? '#4f8aff'   : '#c6ff00',
+                      border:     `1px solid ${phase === 'upload' ? '#4f8aff30' : '#c6ff0030'}`,
+                    }}>
+                      {phase === 'upload' ? '① Uploading' : '② AI Analysis'}
+                    </span>
+                  </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span style={{ fontSize: 13, color: '#888899' }}>{MSGS[msgIdx]}</span>
+                    <span style={{ fontSize: 13, color: '#888899' }}>
+                      {phase === 'upload' ? UPLOAD_MSGS[msgIdx] : ANALYSIS_MSGS[msgIdx]}
+                    </span>
                     <span style={{ fontSize: 13, color: '#c6ff00', fontWeight: 600 }}>{progress}%</span>
                   </div>
                   <div className="ru-bar-track">
                     <div className="ru-bar-fill" style={{ width: `${progress}%` }} />
                   </div>
+                  {phase === 'analysis' && (
+                    <p style={{ fontSize: 11, color: '#444455', marginTop: 8 }}>
+                      AI analysis typically takes 1–2 minutes. Please keep this tab open.
+                    </p>
+                  )}
                 </motion.div>
               )}
             </motion.div>
@@ -269,12 +326,21 @@ const ResumeUpload = ({ onAnalysisComplete }) => {
                 <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'linear-gradient(135deg, #c6ff0030, #4f8aff20)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <div className="spin-slow"><Brain size={24} style={{ color: '#c6ff00' }} /></div>
                 </div>
-                <div>
-                  <p style={{ fontWeight: 600, color: '#f5f5f5', marginBottom: 4, fontSize: 15 }}>AI Analysing Your Resume</p>
-                  <p style={{ fontSize: 13, color: '#888899' }}>Extracting skills, experience patterns and market fit…</p>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontWeight: 600, color: '#f5f5f5', marginBottom: 4, fontSize: 15 }}>
+                    {phase === 'upload' ? 'Uploading Resume…' : 'AI Analysing Your Resume'}
+                  </p>
+                  <p style={{ fontSize: 13, color: '#888899' }}>
+                    {phase === 'upload'
+                      ? 'Transferring your file to the server…'
+                      : 'Extracting skills, experience patterns and market fit. This takes 1–2 min.'}
+                  </p>
                 </div>
-                <div style={{ marginLeft: 'auto', flexShrink: 0 }}>
-                  <span className="ru-pill ru-pill-lime"><Sparkles size={10} /> Live</span>
+                <div style={{ flexShrink: 0 }}>
+                  <span className="ru-pill ru-pill-lime" style={{ gap: 5 }}>
+                    <Sparkles size={10} />
+                    {phase === 'upload' ? 'Uploading' : 'Live'}
+                  </span>
                 </div>
               </div>
             </motion.div>
@@ -289,11 +355,11 @@ const ResumeUpload = ({ onAnalysisComplete }) => {
                 <div style={{ width: 42, height: 42, borderRadius: 12, background: '#22c55e20', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <CheckCircle size={20} style={{ color: '#22c55e' }} />
                 </div>
-                <div>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ fontWeight: 600, color: '#f5f5f5', fontSize: 15 }}>Resume Successfully Analysed</p>
                   <p style={{ fontSize: 13, color: '#888899' }}>Scroll down to see your full profile breakdown</p>
                 </div>
-                <span className="ru-pill ru-pill-green" style={{ marginLeft: 'auto' }}>Complete</span>
+                <span className="ru-pill ru-pill-green" style={{ flexShrink: 0 }}>Complete</span>
               </div>
 
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -303,6 +369,20 @@ const ResumeUpload = ({ onAnalysisComplete }) => {
                 <button className="ru-btn ru-btn-ghost" style={{ fontSize: 13, padding: '10px 18px' }}>
                   <Download size={14} /> Export PDF
                 </button>
+                {/* Remove resume — calls parent handler which clears session */}
+                {onRemove && (
+                  <button
+                    className="ru-btn"
+                    onClick={onRemove}
+                    style={{
+                      fontSize: 13, padding: '10px 18px', marginLeft: 'auto',
+                      background: '#ef444415', color: '#ef4444',
+                      border: '1px solid #ef444430',
+                    }}
+                  >
+                    <X size={14} /> Remove Resume
+                  </button>
+                )}
               </div>
             </motion.div>
           )}
