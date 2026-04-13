@@ -1,168 +1,136 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { X, SlidersHorizontal } from 'lucide-react';
+import { SlidersHorizontal, X } from 'lucide-react';
+
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600&display=swap');
+  .jf-root { font-family: 'DM Sans', sans-serif; }
+  .jf-root .display { font-family: 'Bebas Neue', sans-serif; letter-spacing: .03em; }
+
+  .jf-card {
+    background: #ffffff06; border: 1px solid #ffffff10;
+    border-radius: 18px; padding: 24px; backdrop-filter: blur(24px);
+  }
+
+  .jf-label {
+    display: block; font-size: 11px; font-weight: 600; color: #888899;
+    text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px;
+  }
+
+  .jf-select, .jf-input {
+    width: 100%; padding: 10px 12px;
+    background: #ffffff08; border: 1px solid #ffffff12;
+    border-radius: 10px; color: #f5f5f5; font-family: 'DM Sans', sans-serif;
+    font-size: 13px; outline: none; transition: border-color .2s; appearance: none;
+  }
+  .jf-select:focus, .jf-input:focus { border-color: #c6ff0050; }
+  .jf-select option { background: #12121a; }
+  .jf-input::placeholder { color: #444455; }
+
+  .jf-clear-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: 9px; font-size: 12px; font-weight: 500;
+    background: #ffffff08; border: 1px solid #ffffff12; color: #888899;
+    cursor: pointer; transition: background .15s, color .15s;
+    font-family: 'DM Sans', sans-serif;
+  }
+  .jf-clear-btn:hover { background: #ef444418; color: #ef4444; border-color: #ef444430; }
+
+  .jf-toggle {
+    position: relative; width: 40px; height: 22px; cursor: pointer; flex-shrink: 0;
+  }
+  .jf-toggle input { opacity: 0; width: 0; height: 0; }
+  .jf-toggle-track {
+    position: absolute; inset: 0; border-radius: 999px;
+    background: #ffffff12; border: 1px solid #ffffff14;
+    transition: background .2s, border-color .2s;
+  }
+  .jf-toggle input:checked + .jf-toggle-track { background: #c6ff00; border-color: #c6ff00; }
+  .jf-toggle-thumb {
+    position: absolute; top: 3px; left: 3px; width: 14px; height: 14px;
+    border-radius: 50%; background: #888899; transition: transform .2s, background .2s;
+  }
+  .jf-toggle input:checked ~ .jf-toggle-thumb { transform: translateX(18px); background: #0a0a0f; }
+
+  .jf-divider { height: 1px; background: #ffffff0a; }
+`;
+
+const JOB_TYPES    = [['', 'All Types'], ['full_time', 'Full Time'], ['part_time', 'Part Time'], ['contract', 'Contract'], ['freelance', 'Freelance'], ['internship', 'Internship']];
+const EXP_LEVELS   = [['', 'All Levels'], ['entry', 'Entry Level'], ['junior', 'Junior'], ['mid', 'Mid Level'], ['senior', 'Senior'], ['lead', 'Lead / Principal']];
+const SORT_OPTIONS = [['relevance', 'Most Relevant'], ['date', 'Most Recent'], ['salary_high', 'Salary: High → Low'], ['salary_low', 'Salary: Low → High']];
 
 const JobFilters = ({ filters, setFilters }) => {
-  const updateFilter = (key, value) => {
-    setFilters(prev => ({ ...prev, [key]: value }));
-  };
-
-  const clearFilters = () => {
-    setFilters({
-      jobType: '',
-      experienceLevel: '',
-      salaryMin: '',
-      salaryMax: '',
-      remote: false,
-      sortBy: 'relevance'
-    });
-  };
-
-  const jobTypes = [
-    { value: '', label: 'All Types' },
-    { value: 'full_time', label: 'Full Time' },
-    { value: 'part_time', label: 'Part Time' },
-    { value: 'contract', label: 'Contract' },
-    { value: 'freelance', label: 'Freelance' },
-    { value: 'internship', label: 'Internship' }
-  ];
-
-  const experienceLevels = [
-    { value: '', label: 'All Levels' },
-    { value: 'entry', label: 'Entry Level' },
-    { value: 'junior', label: 'Junior' },
-    { value: 'mid', label: 'Mid Level' },
-    { value: 'senior', label: 'Senior' },
-    { value: 'lead', label: 'Lead/Principal' }
-  ];
-
-  const sortOptions = [
-    { value: 'relevance', label: 'Most Relevant' },
-    { value: 'date', label: 'Most Recent' },
-    { value: 'salary_high', label: 'Salary: High to Low' },
-    { value: 'salary_low', label: 'Salary: Low to High' }
-  ];
+  const update = (key, val) => setFilters(p => ({ ...p, [key]: val }));
+  const clear  = () => setFilters({ jobType: '', experienceLevel: '', salaryMin: '', salaryMax: '', remote: false, sortBy: 'relevance' });
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="glass rounded-2xl p-6"
-    >
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center space-x-2">
-          <SlidersHorizontal className="h-5 w-5 text-white" />
-          <h3 className="text-lg font-semibold text-white">Filters</h3>
+    <>
+      <style>{css}</style>
+      <motion.div
+        className="jf-root jf-card"
+        initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }}
+      >
+        {/* header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 10, background: '#c6ff0018', border: '1px solid #c6ff0030', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <SlidersHorizontal size={16} style={{ color: '#c6ff00' }} />
+            </div>
+            <span className="display" style={{ fontSize: 22, color: '#f5f5f5' }}>Filters</span>
+          </div>
+          <button className="jf-clear-btn" onClick={clear}>
+            <X size={12} /> Clear All
+          </button>
         </div>
-        
-        <motion.button
-          onClick={clearFilters}
-          className="flex items-center space-x-1 px-3 py-1 text-sm text-white/70 hover:text-white transition-colors"
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-        >
-          <X className="h-4 w-4" />
-          <span>Clear All</span>
-        </motion.button>
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        {/* Job Type */}
-        <div>
-          <label className="block text-sm font-medium text-white/80 mb-2">
-            Job Type
+        <div className="jf-divider" style={{ marginBottom: 20 }} />
+
+        {/* filter grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 16, marginBottom: 20 }}>
+          <div>
+            <label className="jf-label">Job Type</label>
+            <select className="jf-select" value={filters.jobType} onChange={e => update('jobType', e.target.value)}>
+              {JOB_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="jf-label">Experience</label>
+            <select className="jf-select" value={filters.experienceLevel} onChange={e => update('experienceLevel', e.target.value)}>
+              {EXP_LEVELS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="jf-label">Min Salary</label>
+            <input className="jf-input" type="number" placeholder="50 000" value={filters.salaryMin} onChange={e => update('salaryMin', e.target.value)} />
+          </div>
+          <div>
+            <label className="jf-label">Max Salary</label>
+            <input className="jf-input" type="number" placeholder="150 000" value={filters.salaryMax} onChange={e => update('salaryMax', e.target.value)} />
+          </div>
+          <div>
+            <label className="jf-label">Sort By</label>
+            <select className="jf-select" value={filters.sortBy} onChange={e => update('sortBy', e.target.value)}>
+              {SORT_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="jf-divider" style={{ marginBottom: 16 }} />
+
+        {/* remote toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <label className="jf-toggle">
+            <input type="checkbox" checked={filters.remote} onChange={e => update('remote', e.target.checked)} />
+            <div className="jf-toggle-track" />
+            <div className="jf-toggle-thumb" />
           </label>
-          <select
-            value={filters.jobType}
-            onChange={(e) => updateFilter('jobType', e.target.value)}
-            className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-          >
-            {jobTypes.map((type) => (
-              <option key={type.value} value={type.value} className="bg-gray-900">
-                {type.label}
-              </option>
-            ))}
-          </select>
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 500, color: '#e0e0ef' }}>Remote only</p>
+            <p style={{ fontSize: 11, color: '#555566' }}>Show remote positions exclusively</p>
+          </div>
         </div>
-
-        {/* Experience Level */}
-        <div>
-          <label className="block text-sm font-medium text-white/80 mb-2">
-            Experience
-          </label>
-          <select
-            value={filters.experienceLevel}
-            onChange={(e) => updateFilter('experienceLevel', e.target.value)}
-            className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-          >
-            {experienceLevels.map((level) => (
-              <option key={level.value} value={level.value} className="bg-gray-900">
-                {level.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Salary Min */}
-        <div>
-          <label className="block text-sm font-medium text-white/80 mb-2">
-            Min Salary
-          </label>
-          <input
-            type="number"
-            placeholder="50000"
-            value={filters.salaryMin}
-            onChange={(e) => updateFilter('salaryMin', e.target.value)}
-            className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-primary-500"
-          />
-        </div>
-
-        {/* Salary Max */}
-        <div>
-          <label className="block text-sm font-medium text-white/80 mb-2">
-            Max Salary
-          </label>
-          <input
-            type="number"
-            placeholder="150000"
-            value={filters.salaryMax}
-            onChange={(e) => updateFilter('salaryMax', e.target.value)}
-            className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-primary-500"
-          />
-        </div>
-
-        {/* Sort By */}
-        <div>
-          <label className="block text-sm font-medium text-white/80 mb-2">
-            Sort By
-          </label>
-          <select
-            value={filters.sortBy}
-            onChange={(e) => updateFilter('sortBy', e.target.value)}
-            className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-          >
-            {sortOptions.map((option) => (
-              <option key={option.value} value={option.value} className="bg-gray-900">
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Remote Work Toggle */}
-      <div className="mt-4 pt-4 border-t border-white/10">
-        <label className="flex items-center space-x-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={filters.remote}
-            onChange={(e) => updateFilter('remote', e.target.checked)}
-            className="w-4 h-4 text-primary-500 bg-white/10 border-white/20 rounded focus:ring-primary-500 focus:ring-2"
-          />
-          <span className="text-white/80">Remote work only</span>
-        </label>
-      </div>
-    </motion.div>
+      </motion.div>
+    </>
   );
 };
 
