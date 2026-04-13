@@ -1,735 +1,1052 @@
 import os
-from typing import Dict, Any, List, Optional, Tuple
-from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
-from langchain_ollama import ChatOllama
-from langgraph.graph import StateGraph, START, END
-from typing_extensions import TypedDict
-import requests
-import pdfplumber
-from io import BytesIO
-import uuid
 import re
+import json
+import time
+import uuid
+import logging
+import torch
+from io import BytesIO
+from typing import Any, Dict, List, Optional, Tuple
+from typing_extensions import TypedDict
+
+import pdfplumber
+import requests
 from dotenv import load_dotenv
+from langgraph.graph import StateGraph, START, END
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 load_dotenv()
+logger = logging.getLogger(__name__)
+
+
+# ──────────────────────────────────────────────
+# State
+# ──────────────────────────────────────────────
 
 class JobMatchingState(TypedDict):
-    """State for LangGraph workflow"""
     session_id: str
     resume_text: str
-    resume_analysis: str
+    resume_analysis: str          # human-readable prose
+    resume_keywords: List[str]    # NEW: extracted skill keywords
+    resume_score: float           # NEW: 0-100 overall resume quality score
     search_query: str
+    enriched_query: str           # NEW: auto-enriched search query
     jobs: List[Dict]
+    ranked_jobs: List[Dict]       # NEW: jobs sorted by keyword overlap
     location: str
     selected_job: Dict
     selected_job_id: str
     match_result: Dict[str, Any]
     cover_letter: str
     interview_tips: str
+    ats_tips: str                 # NEW: ATS optimisation suggestions
     current_step: str
+    step_timings: Dict[str, float]  # NEW: per-node wall-clock seconds
     error: str
+    warnings: List[str]           # NEW: non-fatal issues accumulate here
+
+
+# ──────────────────────────────────────────────
+# Agent
+# ──────────────────────────────────────────────
 
 class JobMatchingAgent:
-    """Job matching agent with LangGraph workflow and PDF processing"""
-    
-    def __init__(self):
-        self.llm = ChatOllama(model="llama3.2", base_url="http://localhost:11434")
-        self.app_id = os.getenv("ADZUNA_APP_ID")
+    """
+    Enhanced job matching agent.
+
+    Architecture
+    ────────────
+    • Local HuggingFace model for all LLM calls (_invoke / _invoke_json)
+    • LangGraph workflow with conditional branching
+    • Adzuna API for live job data (both India + US)
+    • In-memory prompt cache keyed on SHA-256 of (prompt, max_new_tokens)
+    """
+
+    # ── init ──────────────────────────────────
+
+    def __init__(self, model_path: str = "../model/merged_model"):
+        logger.info("Loading model from %s …", model_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info("Using device: %s", self.device)
+
+        if self.device.type == "cuda":
+            from transformers import BitsAndBytesConfig
+            quant_config = BitsAndBytesConfig(load_in_4bit=True)
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                quantization_config=quant_config,
+                device_map="cuda",
+            )
+        else:
+            # CPU fallback — float32 (float16 unsupported on most CPUs).
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                dtype=torch.float32,
+            )
+            self.model.to(self.device)
+
+        self.model.eval()
+
+        self.app_id  = os.getenv("ADZUNA_APP_ID")
         self.app_key = os.getenv("ADZUNA_APP_KEY")
+
+        # Simple in-memory prompt cache  {cache_key: response_str}
+        self._cache: Dict[str, str] = {}
+
         self.workflow = self._create_workflow()
-    
-    def extract_text_from_pdf(self, pdf_file_bytes: bytes) -> str:
-        """Extract text from PDF using pdfplumber"""
-        try:
-            text = ""
-            with pdfplumber.open(BytesIO(pdf_file_bytes)) as pdf:
-                for page in pdf.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n\n"
-            
-            if not text.strip():
-                raise Exception("No text found in PDF")
-            
-            return text.strip()
-            
-        except Exception as e:
-            raise Exception(f"Failed to extract text from PDF: {str(e)}")
-    
-    def _create_workflow(self) -> StateGraph:
-        """Create LangGraph workflow for job matching process"""
-        
-        workflow = StateGraph(JobMatchingState)
-        
-        workflow.add_node("resume_analysis", self._resume_analysis_node)
-        workflow.add_node("job_search", self._job_search_node)
-        workflow.add_node("job_matching", self._job_matching_node)
-        workflow.add_node("cover_letter_generation", self._cover_letter_node)
-        workflow.add_node("interview_tips_generation", self._interview_tips_node)
-        
-        workflow.add_edge(START, "resume_analysis")
-        workflow.add_edge("resume_analysis", "job_search")
-        workflow.add_edge("job_search", "job_matching")
-        workflow.add_edge("job_matching", "cover_letter_generation")
-        workflow.add_edge("cover_letter_generation", "interview_tips_generation")
-        workflow.add_edge("interview_tips_generation", END)
-        
-        return workflow.compile()
-    
-    def _resume_analysis_node(self, state: JobMatchingState) -> JobMatchingState:
-        """LangGraph node: Analyze resume"""
-        
-        if not state.get("resume_text"):
-            return {
-                **state,
-                "current_step": "resume_analysis",
-                "error": "No resume text provided"
-            }
-        
-        prompt = f"""
-        Analyze this resume comprehensively:
-        
-        Resume Content:
-        {state['resume_text']}
-        
-        Please extract and organize the following information:
-        
-        1. **PERSONAL INFORMATION**
-           - Name and contact details
-           - Location preference
-        
-        2. **TECHNICAL SKILLS**
-           - Programming languages
-           - Frameworks and libraries  
-           - Databases and tools
-           - Cloud platforms
-           - Development methodologies
-        
-        3. **EXPERIENCE ANALYSIS**
-           - Total years of experience
-           - Seniority level (Junior/Mid/Senior/Lead)
-           - Domain expertise
-           - Key achievements with metrics
-        
-        4. **EDUCATION & CERTIFICATIONS**
-           - Educational background
-           - Professional certifications
-           - Relevant courses
-        
-        5. **STRENGTHS & HIGHLIGHTS**
-           - Top 5 strongest skills
-           - Notable projects or achievements
-           - Leadership experience
-           - Open source contributions
-        
-        6. **IMPROVEMENT AREAS**
-           - Skills that need development
-           - Experience gaps
-           - Certifications to pursue
-        
-        7. **MARKET POSITIONING**
-           - Suitable for India market? (Yes/No and why)
-           - Suitable for US market? (Yes/No and why)
-           - Recommended salary range (both INR and USD)
-        
-        Format the response with clear headings and bullet points for easy readability.
+        logger.info("JobMatchingAgent ready.")
+
+    # ── inference core ────────────────────────
+
+    def _cache_key(self, prompt: str, max_new_tokens: int) -> str:
+        import hashlib
+        return hashlib.sha256(f"{prompt}|{max_new_tokens}".encode()).hexdigest()
+
+    def _invoke(
+        self,
+        prompt: str,
+        max_new_tokens: int = 1024,
+        temperature: float = 0.7,
+        use_cache: bool = True,
+        retries: int = 2,
+    ) -> str:
         """
-        
+        Run inference on the local HuggingFace model.
+        Includes prompt caching and automatic retry on CUDA/OOM errors.
+        """
+        key = self._cache_key(prompt, max_new_tokens)
+        if use_cache and key in self._cache:
+            logger.debug("Cache hit for prompt (len=%d)", len(prompt))
+            return self._cache[key]
+
+        inputs = self.tokenizer(
+            prompt,
+            return_tensors="pt",
+            truncation=True,
+            max_length=4096,
+        )
+        input_ids = inputs["input_ids"].to(self.device)
+
+        for attempt in range(retries + 1):
+            try:
+                with torch.no_grad():
+                    output_ids = self.model.generate(
+                        input_ids,
+                        max_new_tokens=max_new_tokens,
+                        do_sample=True,
+                        temperature=temperature,
+                        top_p=0.9,
+                        repetition_penalty=1.1,
+                        pad_token_id=self.tokenizer.eos_token_id,
+                    )
+                new_tokens = output_ids[0][input_ids.shape[-1]:]
+                result = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+                if use_cache:
+                    self._cache[key] = result
+                return result
+            except RuntimeError as exc:
+                if attempt < retries:
+                    logger.warning("Model error (attempt %d): %s — retrying", attempt + 1, exc)
+                    time.sleep(1)
+                else:
+                    raise
+
+    def _invoke_json(self, prompt: str, max_new_tokens: int = 512) -> Dict:
+        """
+        Ask the model to respond with JSON only.
+        Wraps _invoke and robustly parses the result.
+        Returns {} on parse failure (never raises).
+        """
+        json_prompt = (
+            prompt
+            + "\n\nRespond ONLY with valid JSON. No explanation, no markdown fences."
+        )
+        raw = self._invoke(json_prompt, max_new_tokens=max_new_tokens, temperature=0.2)
+
+        # Strip accidental markdown fences
+        raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
+
+        # Find first JSON object in the response
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group())
+            except json.JSONDecodeError:
+                pass
+
+        logger.warning("_invoke_json: could not parse JSON from model output")
+        return {}
+
+    def health_check(self) -> bool:
+        """Quick model sanity-check for the /health endpoint."""
         try:
-            response = self.llm.invoke([HumanMessage(content=prompt)])
-            return {
-                **state,
-                "resume_analysis": response.content,
-                "current_step": "resume_analysis",
-                "error": ""
-            }
-        except Exception as e:
-            return {
-                **state,
-                "current_step": "resume_analysis",
-                "error": f"Error analyzing resume: {str(e)}"
-            }
-    
-    def _job_search_node(self, state: JobMatchingState) -> JobMatchingState:
-        """LangGraph node: Search for jobs"""
-        
-        query = state.get("search_query", "developer")
-        
+            result = self._invoke("Hello", max_new_tokens=8, use_cache=False)
+            return bool(result)
+        except Exception:
+            return False
+
+    # ── PDF extraction ────────────────────────
+
+    def extract_text_from_pdf(self, pdf_bytes: bytes) -> str:
+        """
+        Extract text page-by-page, skipping corrupted pages gracefully.
+        Falls back to a raw byte scan if pdfplumber yields nothing.
+        """
+        pages_text: List[str] = []
         try:
-            indian_jobs = self._get_indian_jobs(query)
-            if indian_jobs:
-                return {
-                    **state,
-                    "jobs": indian_jobs,
-                    "location": "India",
-                    "current_step": "job_search",
-                    "error": ""
-                }
-            
-            us_jobs = self._get_us_jobs(query)
-            if us_jobs:
-                return {
-                    **state,
-                    "jobs": us_jobs,
-                    "location": "US",
-                    "current_step": "job_search",
-                    "error": ""
-                }
-            
-            demo_jobs = self._get_indian_jobs(query)
-            return {
-                **state,
-                "jobs": demo_jobs,
-                "location": "India",
-                "current_step": "job_search",
-                "error": ""
-            }
-            
+            with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+                for i, page in enumerate(pdf.pages):
+                    try:
+                        t = page.extract_text()
+                        if t:
+                            pages_text.append(t)
+                    except Exception as page_err:
+                        logger.warning("Skipping page %d: %s", i, page_err)
         except Exception as e:
+            raise ValueError(f"Cannot open PDF: {e}") from e
+
+        text = "\n\n".join(pages_text).strip()
+        if not text:
+            raise ValueError("No readable text found in PDF.")
+        return text
+
+    # ── skill keyword extraction ───────────────
+
+    # Hand-curated keyword list covering the most common tech resume terms.
+    _TECH_KEYWORDS = {
+        "python", "java", "javascript", "typescript", "go", "golang", "rust",
+        "c++", "c#", "ruby", "php", "swift", "kotlin", "scala", "r",
+        "react", "angular", "vue", "next.js", "node.js", "django", "flask",
+        "fastapi", "spring", "express", "rails",
+        "sql", "mysql", "postgresql", "mongodb", "redis", "elasticsearch",
+        "cassandra", "dynamodb", "sqlite",
+        "aws", "gcp", "azure", "docker", "kubernetes", "terraform",
+        "ansible", "jenkins", "ci/cd", "github actions", "circleci",
+        "machine learning", "deep learning", "nlp", "computer vision",
+        "pytorch", "tensorflow", "scikit-learn", "pandas", "numpy",
+        "data engineering", "spark", "kafka", "airflow", "dbt",
+        "rest", "graphql", "grpc", "microservices", "distributed systems",
+        "agile", "scrum", "kanban", "tdd", "bdd",
+        "linux", "bash", "git", "figma", "jira", "confluence",
+    }
+
+    def extract_keywords(self, text: str) -> List[str]:
+        """Return tech keywords found in the text (lowercased, deduped, sorted)."""
+        lower = text.lower()
+        found = sorted({kw for kw in self._TECH_KEYWORDS if kw in lower})
+        return found
+
+    # ── smart query builder ───────────────────
+
+    def _enrich_query(self, raw_query: str, keywords: List[str]) -> str:
+        """
+        Append the top-3 most relevant skills to the raw query so that
+        Adzuna returns tighter results (e.g. "developer python react aws").
+        Avoids duplicating terms already in the query.
+        """
+        lower_q = raw_query.lower()
+        additions = [kw for kw in keywords[:5] if kw not in lower_q][:3]
+        if additions:
+            return f"{raw_query} {' '.join(additions)}"
+        return raw_query
+
+    # ── resume scorer ─────────────────────────
+
+    def _score_resume(self, resume_text: str, keywords: List[str]) -> float:
+        """
+        Heuristic resume quality score (0-100):
+          30 pts — keyword breadth  (≥15 keywords = full marks)
+          30 pts — length/detail    (≥800 words = full marks)
+          20 pts — quantified achievements (numbers in resume)
+          20 pts — education signal (degree keywords present)
+        """
+        kw_score   = min(len(keywords) / 15.0, 1.0) * 30
+        words      = len(resume_text.split())
+        len_score  = min(words / 800.0, 1.0) * 30
+        nums       = len(re.findall(r"\d+", resume_text))
+        quant_score = min(nums / 20.0, 1.0) * 20
+        edu_terms  = {"bachelor", "master", "phd", "b.tech", "m.tech", "degree", "university", "college"}
+        edu_score  = 20.0 if any(t in resume_text.lower() for t in edu_terms) else 0.0
+        return round(kw_score + len_score + quant_score + edu_score, 1)
+
+    # ── job ranking ───────────────────────────
+
+    def _rank_jobs(self, jobs: List[Dict], keywords: List[str]) -> List[Dict]:
+        """
+        Score each job by how many of the candidate's keywords appear in
+        its description, then return the list sorted descending.
+        Adds a 'relevance_score' field to each job dict.
+        """
+        kw_set = set(keywords)
+        for job in jobs:
+            desc = (job.get("description", "") + " " + job.get("full_description", "")).lower()
+            overlap = sum(1 for kw in kw_set if kw in desc)
+            job["relevance_score"] = overlap
+        return sorted(jobs, key=lambda j: j["relevance_score"], reverse=True)
+
+    # ── salary helpers ────────────────────────
+
+    @staticmethod
+    def _fmt_salary(job: Dict) -> str:
+        if not job.get("salary_min") or not job.get("salary_max"):
+            return "Not specified"
+        cur = job.get("currency", "USD")
+        lo, hi = int(job["salary_min"]), int(job["salary_max"])
+        if cur == "INR":
+            # Convert raw annual rupees to LPA display
+            return f"₹{lo:,} – ₹{hi:,} p.a."
+        return f"${lo:,} – ${hi:,} p.a."
+
+    # ── workflow definition ───────────────────
+
+    def _create_workflow(self) -> StateGraph:
+        wf = StateGraph(JobMatchingState)
+
+        wf.add_node("resume_analysis",          self._resume_analysis_node)
+        wf.add_node("job_search",               self._job_search_node)
+        wf.add_node("job_matching",             self._job_matching_node)
+        wf.add_node("cover_letter_generation",  self._cover_letter_node)
+        wf.add_node("interview_tips_generation", self._interview_tips_node)
+        wf.add_node("ats_optimisation",         self._ats_tips_node)   # NEW
+
+        wf.add_edge(START, "resume_analysis")
+        wf.add_edge("resume_analysis", "job_search")
+        wf.add_edge("job_search", "job_matching")
+        wf.add_conditional_edges(
+            "job_matching",
+            self._route_after_match,
+            {"generate": "cover_letter_generation", "end": END},
+        )
+        wf.add_edge("cover_letter_generation",   "interview_tips_generation")
+        wf.add_edge("interview_tips_generation", "ats_optimisation")
+        wf.add_edge("ats_optimisation",          END)
+
+        return wf.compile()
+
+    def _route_after_match(self, state: JobMatchingState) -> str:
+        if state.get("match_result") and state.get("selected_job"):
+            return "generate"
+        return "end"
+
+    # ── helpers ───────────────────────────────
+
+    @staticmethod
+    def _empty_state() -> JobMatchingState:
+        return JobMatchingState(
+            session_id="", resume_text="", resume_analysis="",
+            resume_keywords=[], resume_score=0.0,
+            search_query="", enriched_query="",
+            jobs=[], ranked_jobs=[], location="",
+            selected_job={}, selected_job_id="",
+            match_result={}, cover_letter="", interview_tips="", ats_tips="",
+            current_step="", step_timings={}, error="", warnings=[],
+        )
+
+    @staticmethod
+    def _tick(state: JobMatchingState, node: str, t0: float) -> Dict[str, float]:
+        timings = dict(state.get("step_timings") or {})
+        timings[node] = round(time.time() - t0, 2)
+        return timings
+
+    @staticmethod
+    def _add_warning(state: JobMatchingState, msg: str) -> List[str]:
+        w = list(state.get("warnings") or [])
+        w.append(msg)
+        return w
+
+    # ── node: resume analysis ─────────────────
+
+    def _resume_analysis_node(self, state: JobMatchingState) -> Dict:
+        t0 = time.time()
+        node = "resume_analysis"
+
+        if not state.get("resume_text"):
+            return {**state, "current_step": node,
+                    "error": "No resume text provided",
+                    "step_timings": self._tick(state, node, t0)}
+
+        resume_text = state["resume_text"]
+
+        # --- keyword extraction (no LLM needed) ---
+        keywords = self.extract_keywords(resume_text)
+        resume_score = self._score_resume(resume_text, keywords)
+
+        warnings = list(state.get("warnings") or [])
+        if resume_score < 40:
+            warnings.append(
+                f"Resume quality score is low ({resume_score}/100). "
+                "Consider adding more quantified achievements and technical skills."
+            )
+
+        prompt = f"""You are an expert technical recruiter. Analyze the resume below and produce a structured report.
+
+RESUME:
+{resume_text}
+
+Write your analysis under these exact headings:
+
+## Personal Information
+Name, contact, location.
+
+## Technical Skills
+List all programming languages, frameworks, databases, cloud tools, and methodologies found. Be exhaustive.
+
+## Experience Analysis
+Total years of experience, seniority level (Junior / Mid / Senior / Lead / Principal), domain expertise, and top 3 achievements with measurable impact.
+
+## Education & Certifications
+Degrees, institutions, graduation years, professional certifications, and relevant online courses.
+
+## Strengths
+The candidate's top 5 strongest areas with a one-line justification each.
+
+## Improvement Areas
+The 3 most important gaps in skills, experience, or credentials, ordered by priority.
+
+## Market Positioning
+State clearly:
+- India market fit: Yes or No, and one sentence why.
+- US/global market fit: Yes or No, and one sentence why.
+- Recommended salary range in INR (LPA) and USD.
+
+## Resume Score Commentary
+The resume has been scored {resume_score}/100. Explain what drove the score up and what the candidate should improve.
+
+Be specific and actionable. Use bullet points inside each section.
+"""
+
+        try:
+            analysis = self._invoke(prompt, max_new_tokens=1200)
             return {
                 **state,
-                "current_step": "job_search",
-                "error": f"Error searching jobs: {str(e)}"
+                "resume_analysis": analysis,
+                "resume_keywords": keywords,
+                "resume_score": resume_score,
+                "current_step": node,
+                "error": "",
+                "warnings": warnings,
+                "step_timings": self._tick(state, node, t0),
             }
-    
-    def _job_matching_node(self, state: JobMatchingState) -> JobMatchingState:
-        """LangGraph node: Analyze job match"""
-        
+        except Exception as exc:
+            return {
+                **state,
+                "resume_keywords": keywords,
+                "resume_score": resume_score,
+                "current_step": node,
+                "error": f"Resume analysis failed: {exc}",
+                "step_timings": self._tick(state, node, t0),
+            }
+
+    # ── node: job search ──────────────────────
+
+    def _job_search_node(self, state: JobMatchingState) -> Dict:
+        t0 = time.time()
+        node = "job_search"
+
+        raw_query = state.get("search_query", "software developer").strip() or "software developer"
+        keywords  = state.get("resume_keywords", [])
+        enriched  = self._enrich_query(raw_query, keywords)
+
+        warnings = list(state.get("warnings") or [])
+
+        # Try live Adzuna India first, then US, then synthetic fallback
+        jobs, location = [], "Unknown"
+
+        adzuna_india = self._get_adzuna_jobs(enriched, country="in", currency="INR")
+        if adzuna_india:
+            jobs, location = adzuna_india, "India"
+        else:
+            adzuna_us = self._get_adzuna_jobs(enriched, country="us", currency="USD")
+            if adzuna_us:
+                jobs, location = adzuna_us, "US"
+            else:
+                warnings.append("Live job API unavailable — showing synthetic listings.")
+                jobs = self._synthetic_jobs(raw_query)
+                location = "India (demo)"
+
+        ranked = self._rank_jobs(jobs, keywords)
+
+        return {
+            **state,
+            "enriched_query": enriched,
+            "jobs": jobs,
+            "ranked_jobs": ranked,
+            "location": location,
+            "current_step": node,
+            "error": "",
+            "warnings": warnings,
+            "step_timings": self._tick(state, node, t0),
+        }
+
+    # ── node: job matching ────────────────────
+
+    def _job_matching_node(self, state: JobMatchingState) -> Dict:
+        t0 = time.time()
+        node = "job_matching"
+
         if not state.get("selected_job"):
             return {
                 **state,
-                "current_step": "job_matching",
-                "error": "No job selected for matching"
+                "match_result": {},
+                "current_step": node,
+                "error": "No job selected for matching",
+                "step_timings": self._tick(state, node, t0),
             }
-        
-        job = state["selected_job"]
+
+        job             = state["selected_job"]
         resume_analysis = state.get("resume_analysis", "")
-        
-        salary_info = "Not specified"
-        if job.get("salary_min") and job.get("salary_max"):
-            currency = job.get("currency", "USD")
-            if currency == "INR":
-                salary_info = f"₹{job['salary_min']:,} - ₹{job['salary_max']:,} per annum"
-            else:
-                salary_info = f"${job['salary_min']:,} - ${job['salary_max']:,} per annum"
-        
-        prompt = f"""
-        Perform a detailed job matching analysis:
-        
-        **RESUME ANALYSIS:**
-        {resume_analysis}
-        
-        **JOB DETAILS:**
-        • Position: {job.get('title')}
-        • Company: {job.get('company')}
-        • Location: {job.get('location')} ({job.get('country')})
-        • Salary Range: {salary_info}
-        • Job Description:
-        {job.get('full_description')}
-        
-        Please provide a comprehensive analysis with:
-        
-        1. **OVERALL MATCH SCORE**
-           - Give a percentage match (0-100%)
-           - Explain the reasoning behind the score
-        
-        2. **SKILL ALIGNMENT**
-           - ✅ Skills that perfectly match job requirements
-           - ⚠️ Skills that partially match or need improvement  
-           - ❌ Critical skills that are completely missing
-        
-        3. **EXPERIENCE MATCH**
-           - How candidate's experience level fits the role
-           - Relevant projects and achievements
-           - Industry experience alignment
-        
-        4. **LOCATION & MARKET FIT**
-           - Suitability for the job's location and market
-           - Visa/work authorization considerations (if applicable)
-           - Cultural and work style fit
-        
-        5. **SALARY EXPECTATIONS**
-           - Is the offered salary range appropriate?
-           - Negotiation potential based on candidate's profile
-        
-        6. **GAP ANALYSIS**
-           - Most critical missing skills/experience
-           - Impact of each gap (High/Medium/Low)
-           - Time required to bridge gaps
-        
-        7. **COMPETITIVE POSITIONING**
-           - Candidate's strengths vs typical applicants
-           - Unique value proposition
-           - Areas where candidate might struggle
-        
-        8. **IMPROVEMENT RECOMMENDATIONS**
-           - Top 3 priority skills to develop
-           - Specific courses, certifications, or projects
-           - Timeline for improvement (1-3 months, 3-6 months, 6+ months)
-        
-        9. **APPLICATION STRATEGY**
-           - Key points to highlight in application
-           - How to address weaknesses positively
-           - Best approach for this specific role
-        
-        Be specific, honest, and actionable in your analysis.
-        """
-        
+        keywords        = state.get("resume_keywords", [])
+        salary_display  = self._fmt_salary(job)
+
+        # --- quick keyword-overlap pre-score (instant, no LLM) ---
+        desc_lower = (job.get("full_description", "") + " " + job.get("description", "")).lower()
+        overlap    = [kw for kw in keywords if kw in desc_lower]
+        pre_score  = min(len(overlap) / max(len(keywords), 1), 1.0) * 100
+
+        prompt = f"""You are a senior technical recruiter performing a detailed candidate-job match analysis.
+
+CANDIDATE RESUME ANALYSIS:
+{resume_analysis}
+
+JOB DETAILS:
+Title: {job.get('title')}
+Company: {job.get('company')}
+Location: {job.get('location')}, {job.get('country')}
+Salary: {salary_display}
+Description:
+{job.get('full_description', job.get('description', 'N/A'))}
+
+Provide your analysis under these exact headings:
+
+## Match Score
+Give a single integer percentage (0–100) on its own line like: SCORE: 72
+Then explain the score in 2–3 sentences.
+
+## Skill Alignment
+For each key requirement in the job description, state whether the candidate has it (✅ Present / ⚠️ Partial / ❌ Missing).
+
+## Experience Fit
+Does the candidate's seniority and domain match? What is their biggest experiential advantage? Their biggest gap?
+
+## Salary Fit
+Is the listed salary range appropriate for the candidate's profile? Should they negotiate up or down?
+
+## Gap Analysis
+List the top 3 missing skills/experiences with:
+  - Impact: High / Medium / Low
+  - Time to bridge: e.g. "2–3 months of focused learning"
+
+## Application Strategy
+Three specific, concrete actions the candidate should take when applying for this role.
+
+## Red Flags
+Any concerns the hiring manager might raise (employment gaps, mismatched seniority, etc.).
+
+Be direct and specific. The candidate needs honest, actionable feedback.
+"""
+
         try:
-            response = self.llm.invoke([HumanMessage(content=prompt)])
-            
-            match_patterns = [
-                r'(\d+)%',
-                r'match.*?(\d+)%',
-                r'score.*?(\d+)%',
-                r'percentage.*?(\d+)'
-            ]
-            
-            match_score = 0.0
-            for pattern in match_patterns:
-                score_match = re.search(pattern, response.content, re.IGNORECASE)
-                if score_match:
-                    match_score = float(score_match.group(1)) / 100.0
-                    break
-            
+            analysis_text = self._invoke(prompt, max_new_tokens=1400)
+
+            # --- extract SCORE: N from LLM output ---
+            score = pre_score / 100.0  # default to keyword pre-score
+            score_match = re.search(r"SCORE:\s*(\d+)", analysis_text)
+            if score_match:
+                raw_val = int(score_match.group(1))
+                score = max(0.0, min(raw_val, 100)) / 100.0
+            else:
+                # fallback: grab any standalone percentage
+                pcts = re.findall(r"(\d+)\s*%", analysis_text)
+                if pcts:
+                    score = max(0.0, min(int(pcts[0]), 100)) / 100.0
+
             match_result = {
-                "match_score": match_score,
-                "analysis": response.content,
-                "job_title": job.get('title'),
-                "company": job.get('company'),
-                "location": job.get('location'),
-                "country": job.get('country')
+                "match_score":   score,
+                "pre_score":     round(pre_score / 100.0, 2),
+                "keyword_overlap": overlap,
+                "analysis":      analysis_text,
+                "job_title":     job.get("title"),
+                "company":       job.get("company"),
+                "location":      job.get("location"),
+                "country":       job.get("country"),
             }
-            
+
             return {
                 **state,
                 "match_result": match_result,
-                "current_step": "job_matching",
-                "error": ""
+                "current_step": node,
+                "error": "",
+                "step_timings": self._tick(state, node, t0),
             }
-            
-        except Exception as e:
+
+        except Exception as exc:
             return {
                 **state,
-                "current_step": "job_matching",
-                "error": f"Error analyzing job match: {str(e)}"
+                "match_result": {},
+                "current_step": node,
+                "error": f"Match analysis failed: {exc}",
+                "step_timings": self._tick(state, node, t0),
             }
-    
-    def _cover_letter_node(self, state: JobMatchingState) -> JobMatchingState:
-        """LangGraph node: Generate cover letter"""
-        
-        job = state.get("selected_job", {})
+
+    # ── node: cover letter ────────────────────
+
+    def _cover_letter_node(self, state: JobMatchingState) -> Dict:
+        t0 = time.time()
+        node = "cover_letter_generation"
+
+        job            = state.get("selected_job", {})
         resume_analysis = state.get("resume_analysis", "")
-        match_analysis = state.get("match_result", {}).get("analysis", "")
-        
-        prompt = f"""
-        Generate a professional, compelling cover letter:
-        
-        **JOB INFORMATION:**
-        • Position: {job.get('title')}
-        • Company: {job.get('company')}
-        • Location: {job.get('location')}
-        
-        **CANDIDATE PROFILE:**
-        {resume_analysis}
-        
-        **MATCH ANALYSIS:**
-        {match_analysis}
-        
-        Create a cover letter that:
-        
-        1. **STRUCTURE:**
-           - Professional header with date
-           - Proper addressing (Dear Hiring Manager or specific name if known)
-           - 3-4 paragraph body
-           - Professional closing
-        
-        2. **CONTENT REQUIREMENTS:**
-           - Opening: Strong hook showing enthusiasm and knowledge of company
-           - Body: Highlight most relevant experience and achievements with specific examples
-           - Address key job requirements directly
-           - Show understanding of company's industry and challenges
-           - Address any skill gaps positively (eagerness to learn, transferable skills)
-           - Quantify achievements where possible
-        
-        3. **TONE & STYLE:**
-           - Professional but personable
-           - Confident without being arrogant  
-           - Specific to this role (no generic language)
-           - Show genuine interest in the company
-           - 350-450 words total
-        
-        4. **CALL TO ACTION:**
-           - Express interest in discussing the role further
-           - Professional sign-off
-        
-        Make it compelling and ready to send as-is.
-        """
-        
+        match_analysis  = (state.get("match_result") or {}).get("analysis", "")
+        overlap_skills  = (state.get("match_result") or {}).get("keyword_overlap", [])
+
+        # Build a concise skill highlight line for the prompt
+        skill_line = ", ".join(overlap_skills[:6]) if overlap_skills else "relevant technical skills"
+
+        prompt = f"""Write a professional cover letter for the following application.
+
+JOB:
+Title: {job.get('title')}
+Company: {job.get('company')}
+Location: {job.get('location')}
+
+CANDIDATE PROFILE (from resume analysis):
+{resume_analysis}
+
+MATCH INSIGHTS:
+{match_analysis[:800]}
+
+KEY OVERLAPPING SKILLS: {skill_line}
+
+Requirements for the cover letter:
+1. Length: 350–420 words (strictly).
+2. Structure: Date → "Dear Hiring Team," → Opening paragraph → Two body paragraphs → Closing paragraph → "Sincerely," → [Candidate Name].
+3. Opening: One punchy sentence establishing enthusiasm + one specific thing the candidate knows about {job.get('company')}.
+4. Body paragraph 1: Highlight 2–3 specific achievements from the resume with numbers. Tie them directly to this role.
+5. Body paragraph 2: Address the most critical job requirement and show exactly how the candidate meets it. Weave in {skill_line}.
+6. Closing: Express eagerness for an interview, provide a call-to-action.
+7. Tone: Confident and specific. No filler phrases like "I am writing to express my interest".
+8. Do NOT invent facts not present in the resume analysis.
+
+Output only the letter text, nothing else.
+"""
+
         try:
-            response = self.llm.invoke([HumanMessage(content=prompt)])
+            letter = self._invoke(prompt, max_new_tokens=700, temperature=0.75)
             return {
                 **state,
-                "cover_letter": response.content,
-                "current_step": "cover_letter_generation",
-                "error": ""
+                "cover_letter": letter,
+                "current_step": node,
+                "error": "",
+                "step_timings": self._tick(state, node, t0),
             }
-        except Exception as e:
+        except Exception as exc:
             return {
                 **state,
-                "current_step": "cover_letter_generation",
-                "error": f"Error generating cover letter: {str(e)}"
+                "current_step": node,
+                "error": f"Cover letter generation failed: {exc}",
+                "step_timings": self._tick(state, node, t0),
             }
-    
-    def _interview_tips_node(self, state: JobMatchingState) -> JobMatchingState:
-        """LangGraph node: Generate interview tips"""
-        
-        job = state.get("selected_job", {})
+
+    # ── node: interview tips ──────────────────
+
+    def _interview_tips_node(self, state: JobMatchingState) -> Dict:
+        t0 = time.time()
+        node = "interview_tips_generation"
+
+        job            = state.get("selected_job", {})
         resume_analysis = state.get("resume_analysis", "")
-        match_analysis = state.get("match_result", {}).get("analysis", "")
-        
-        prompt = f"""
-        Generate a comprehensive interview preparation guide:
-        
-        **JOB INFORMATION:**
-        • Position: {job.get('title')}  
-        • Company: {job.get('company')}
-        • Location: {job.get('location')} ({job.get('country')})
-        
-        **CANDIDATE PROFILE:**
-        {resume_analysis}
-        
-        **MATCH ANALYSIS:**
-        {match_analysis}
-        
-        Create a detailed interview preparation guide with:
-        
-        1. **TECHNICAL QUESTIONS TO EXPECT**
-           - 5-7 specific technical questions likely for this role
-           - Sample approach/answers for each
-           - Coding challenges to practice
-           - System design questions (if applicable)
-        
-        2. **BEHAVIORAL QUESTIONS**
-           - 5-6 behavioral questions common for this role level
-           - STAR method examples using candidate's actual experience
-           - Leadership and teamwork scenarios
-        
-        3. **COMPANY-SPECIFIC PREPARATION**
-           - Key things to research about {job.get('company')}
-           - Industry trends and challenges to discuss
-           - Company culture and values alignment
-           - Recent company news or developments
-        
-        4. **QUESTIONS TO ASK INTERVIEWER**
-           - 6-8 thoughtful questions showing genuine interest
-           - Technical questions about stack/architecture
-           - Culture and growth questions
-           - Role-specific questions
-        
-        5. **SHOWCASING YOUR EXPERIENCE**
-           - Top 3 projects/achievements to highlight
-           - How to present each with impact metrics
-           - Handling questions about experience gaps
-        
-        6. **HANDLING WEAKNESSES/GAPS**
-           - How to address missing skills positively
-           - Learning commitment statements
-           - Transferable skills to emphasize
-           - Practice answers for weak areas
-        
-        7. **SALARY NEGOTIATION STRATEGY**
-           - Research on market rates for this role
-           - How to handle salary questions
-           - Negotiation talking points based on candidate's profile
-        
-        8. **PRACTICAL INTERVIEW TIPS**
-           - What to bring/prepare
-           - Dress code for {job.get('country')} market
-           - Video interview best practices
-           - Follow-up strategy
-        
-        9. **MOCK INTERVIEW SCENARIOS**
-           - 3-4 complete question-answer scenarios
-           - Practice timeline (1-2 weeks before interview)
-        
-        Make it specific, actionable, and tailored to this exact role and candidate profile.
-        """
-        
+        match_analysis  = (state.get("match_result") or {}).get("analysis", "")
+        overlap_skills  = (state.get("match_result") or {}).get("keyword_overlap", [])
+        salary_display  = self._fmt_salary(job)
+
+        prompt = f"""Create a comprehensive, role-specific interview preparation guide.
+
+JOB:
+Title: {job.get('title')} at {job.get('company')} ({job.get('location')}, {job.get('country')})
+Salary: {salary_display}
+Description:
+{job.get('full_description', job.get('description', ''))[:1000]}
+
+CANDIDATE'S MATCHING SKILLS: {', '.join(overlap_skills[:8]) or 'see resume'}
+
+MATCH ANALYSIS HIGHLIGHTS:
+{match_analysis[:600]}
+
+Produce the guide under these exact sections:
+
+## Technical Questions (5 questions)
+For each: write the question, then a model answer tailored to this candidate's background.
+
+## Behavioral Questions (4 questions)
+For each: write the question and a STAR-format answer using the candidate's likely experience.
+
+## System Design / Architecture Question
+One relevant system design question for this role, with a structured approach to answering it.
+
+## Research Checklist
+Five specific things to research about {job.get('company')} before the interview, with why each matters.
+
+## Questions to Ask the Interviewer (6 questions)
+Thoughtful, role-specific questions that signal genuine interest and intelligence.
+
+## Addressing Weak Points
+How to handle the top 2 gaps identified in the match analysis.
+
+## Salary Negotiation
+Given the listed salary of {salary_display} and this candidate's profile, provide a concrete negotiation script (2–3 sentences the candidate can actually say).
+
+## 7-Day Prep Timeline
+A day-by-day plan for the week before the interview.
+
+Be specific to this exact role and company — no generic advice.
+"""
+
         try:
-            response = self.llm.invoke([HumanMessage(content=prompt)])
+            tips = self._invoke(prompt, max_new_tokens=1600)
             return {
                 **state,
-                "interview_tips": response.content,
-                "current_step": "interview_tips_generation",
-                "error": ""
+                "interview_tips": tips,
+                "current_step": node,
+                "error": "",
+                "step_timings": self._tick(state, node, t0),
             }
-        except Exception as e:
+        except Exception as exc:
             return {
                 **state,
-                "current_step": "interview_tips_generation",
-                "error": f"Error generating interview tips: {str(e)}"
+                "current_step": node,
+                "error": f"Interview tips generation failed: {exc}",
+                "step_timings": self._tick(state, node, t0),
             }
-    
-    def _get_indian_jobs(self, query: str) -> List[Dict]:
-        """Get Indian jobs (sample data)"""
-        
-        indian_companies = [
-            "Tata Consultancy Services", "Infosys Limited", "Wipro Technologies", 
-            "HCL Technologies", "Tech Mahindra", "Accenture India", "IBM India",
-            "Microsoft India", "Google India", "Amazon India", "Flipkart", 
-            "Paytm", "Swiggy", "Zomato", "Ola"
+
+    # ── node: ATS tips (NEW) ──────────────────
+
+    def _ats_tips_node(self, state: JobMatchingState) -> Dict:
+        """
+        Generate ATS (Applicant Tracking System) optimisation suggestions
+        by comparing the candidate's keyword set against the job description.
+        """
+        t0 = time.time()
+        node = "ats_optimisation"
+
+        job       = state.get("selected_job", {})
+        keywords  = state.get("resume_keywords", [])
+        resume_text = state.get("resume_text", "")
+
+        jd_text   = job.get("full_description", job.get("description", ""))
+        jd_kws    = self.extract_keywords(jd_text)
+        missing   = [kw for kw in jd_kws if kw not in keywords]
+        present   = [kw for kw in jd_kws if kw in keywords]
+
+        prompt = f"""You are an ATS (Applicant Tracking System) optimisation expert.
+
+JOB TITLE: {job.get('title')} at {job.get('company')}
+
+KEYWORDS PRESENT in both resume and job description: {', '.join(present) or 'none'}
+KEYWORDS MISSING from resume but required by job: {', '.join(missing) or 'none'}
+
+RESUME EXCERPT (first 600 chars):
+{resume_text[:600]}
+
+Provide ATS optimisation advice under these headings:
+
+## ATS Keyword Gaps
+List the missing keywords and for each:
+- Suggest one natural sentence the candidate could add to their resume to include it authentically.
+
+## Formatting Fixes
+Three specific formatting improvements to make the resume more ATS-friendly (based on common ATS parsing pitfalls).
+
+## Section Order Recommendation
+What is the optimal section ordering for this role type (e.g. Skills before Experience, or vice versa)?
+
+## Tailored Resume Summary
+Write a 3-sentence professional summary the candidate should add to the top of their resume, optimised for ATS and tailored to {job.get('title')}.
+
+Be concrete and specific.
+"""
+
+        try:
+            tips = self._invoke(prompt, max_new_tokens=900)
+        except Exception as exc:
+            tips = f"ATS tips unavailable: {exc}"
+
+        return {
+            **state,
+            "ats_tips": tips,
+            "current_step": node,
+            "step_timings": self._tick(state, node, t0),
+        }
+
+    # ── Adzuna API (India + US) ───────────────
+
+    # Maps Adzuna country codes to human-readable names and default currencies.
+    _ADZUNA_COUNTRIES = {
+        "in": ("India",          "INR"),
+        "us": ("United States",  "USD"),
+        "gb": ("United Kingdom", "GBP"),
+        "au": ("Australia",      "AUD"),
+        "ca": ("Canada",         "CAD"),
+        "de": ("Germany",        "EUR"),
+        "sg": ("Singapore",      "SGD"),
+    }
+
+    def _get_adzuna_jobs(
+        self,
+        query: str,
+        country: str = "in",
+        currency: str = "INR",
+        page: int = 1,
+        results: int = 10,
+    ) -> List[Dict]:
+        """
+        Fetch jobs from Adzuna using the documented URL format:
+          http://api.adzuna.com/v1/api/jobs/{country}/search/{page}
+            ?app_id=...&app_key=...&results_per_page=...&what=...&content-type=application/json
+
+        country codes: in=India, us=US, gb=UK, au=Australia, ca=Canada, de=Germany, sg=Singapore
+        NOTE: Adzuna uses plain http (not https) as shown in their official docs.
+        content-type must be a query param per Adzuna spec, NOT a request header.
+        """
+        if not self.app_id or not self.app_key:
+            logger.warning("Adzuna API credentials missing — set ADZUNA_APP_ID and ADZUNA_APP_KEY in .env")
+            return []
+
+        country_name, default_currency = self._ADZUNA_COUNTRIES.get(
+            country, (country.upper(), currency)
+        )
+        # Use caller-supplied currency if explicitly passed, otherwise use country default
+        effective_currency = currency if currency else default_currency
+
+        # Adzuna official URL format uses http (not https)
+        url = f"http://api.adzuna.com/v1/api/jobs/{country}/search/{page}"
+
+        # content-type is a query param per Adzuna docs, not a header
+        params = {
+            "app_id":           self.app_id,
+            "app_key":          self.app_key,
+            "results_per_page": results,
+            "what":             query,
+            "content-type":     "application/json",
+        }
+
+        try:
+            resp = requests.get(
+                url,
+                params=params,
+                headers={"Accept": "application/json"},
+                timeout=12,
+            )
+            resp.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            logger.warning(
+                "Adzuna %s API HTTP error %s: %s",
+                country_name, exc.response.status_code, exc.response.text[:200],
+            )
+            return []
+        except requests.RequestException as exc:
+            logger.warning("Adzuna %s API request failed: %s", country_name, exc)
+            return []
+
+        try:
+            data = resp.json()
+        except ValueError:
+            logger.warning("Adzuna %s returned non-JSON response", country_name)
+            return []
+
+        raw_jobs = data.get("results", [])
+        if not raw_jobs:
+            logger.info("Adzuna %s: query=%r returned 0 results", country_name, query)
+            return []
+
+        formatted = []
+        for job in raw_jobs:
+            desc       = job.get("description", "")
+            salary_min = job.get("salary_min")
+            salary_max = job.get("salary_max")
+            formatted.append({
+                "id":               f"{country}_{job.get('id', uuid.uuid4().hex[:8])}",
+                "title":            job.get("title", "Software Developer"),
+                "company":          job.get("company", {}).get("display_name", "Unknown Company"),
+                "location":         job.get("location", {}).get("display_name", country_name),
+                "description":      desc[:400] + ("…" if len(desc) > 400 else ""),
+                "full_description": desc,
+                "salary_min":       salary_min,
+                "salary_max":       salary_max,
+                "currency":         effective_currency,
+                "contract_type":    job.get("contract_type", "full_time"),
+                "country":          country_name,
+                "posted_date":      job.get("created", "")[:10],
+                "apply_url":        job.get("redirect_url", ""),
+                "relevance_score":  0,
+            })
+
+        logger.info("Adzuna %s: fetched %d jobs for query=%r", country_name, len(formatted), query)
+        return formatted
+
+    # ── synthetic job fallback ────────────────
+
+    def _synthetic_jobs(self, query: str) -> List[Dict]:
+        """Demo listings used when the Adzuna API is unavailable."""
+        companies = [
+            "Tata Consultancy Services", "Infosys", "Wipro", "HCL Technologies",
+            "Tech Mahindra", "Accenture India", "IBM India", "Microsoft India",
+            "Google India", "Amazon India",
         ]
-        
-        indian_cities = [
+        cities = [
             "Bangalore, Karnataka", "Hyderabad, Telangana", "Pune, Maharashtra",
             "Chennai, Tamil Nadu", "Mumbai, Maharashtra", "Gurgaon, Haryana",
-            "Noida, Uttar Pradesh", "Kolkata, West Bengal", "Ahmedabad, Gujarat",
-            "Kochi, Kerala"
+            "Noida, Uttar Pradesh", "Kolkata, West Bengal",
         ]
-        
-        job_titles = [
+        titles = [
             f"Senior {query}", f"Lead {query}", f"Principal {query}",
-            f"{query} - Team Lead", f"Full Stack {query}", f"Backend {query}",
-            f"Frontend {query}", f"{query} - II", f"{query} - III", f"Staff {query}"
+            f"{query} — Team Lead", f"Full Stack {query}", f"Backend {query}",
+            f"Frontend {query}", f"Staff {query}",
         ]
-        
         jobs = []
-        for i in range(10):
-            base_salary = 800000 + (i * 150000)
-            job = {
-                "id": f"in_{uuid.uuid4().hex[:8]}",
-                "title": job_titles[i % len(job_titles)],
-                "company": indian_companies[i % len(indian_companies)],
-                "location": indian_cities[i % len(indian_cities)],
-                "description": f"Join {indian_companies[i % len(indian_companies)]} as a {query}. Work on innovative projects with cutting-edge technology stack.",
-                "full_description": f"""We are seeking a talented {query} to join our dynamic team at {indian_companies[i % len(indian_companies)]}.
-
-Key Responsibilities:
-• Design and develop scalable web applications
-• Collaborate with cross-functional teams
-• Write clean, maintainable code
-• Participate in code reviews and agile processes
-• Work with modern tech stack: React.js, Node.js, Python, AWS/Azure
-
-Requirements:
-• 3+ years of experience in software development
-• Strong knowledge of JavaScript, Python, or Java
-• Experience with databases (MySQL, MongoDB)
-• Knowledge of RESTful APIs and microservices
-• Understanding of DevOps practices
-
-What We Offer:
-• Competitive salary and benefits
-• Flexible work arrangements
-• Learning and development opportunities
-• Health insurance and wellness programs""",
-                "salary_min": base_salary,
-                "salary_max": base_salary + 400000,
-                "currency": "INR",
+        for i in range(8):
+            base = 800_000 + i * 200_000
+            company = companies[i % len(companies)]
+            jobs.append({
+                "id":            f"demo_{uuid.uuid4().hex[:8]}",
+                "title":         titles[i % len(titles)],
+                "company":       company,
+                "location":      cities[i % len(cities)],
+                "description":   f"Join {company} as a {query}. Work on cutting-edge projects.",
+                "full_description": (
+                    f"We are looking for a talented {query} to join {company}.\n\n"
+                    "Responsibilities:\n"
+                    "• Design and build scalable systems\n"
+                    "• Collaborate with cross-functional teams\n"
+                    "• Conduct code reviews\n\n"
+                    "Requirements:\n"
+                    "• 3+ years experience\n"
+                    "• Strong Python / Java / JavaScript skills\n"
+                    "• REST API and microservices knowledge\n"
+                    "• Cloud experience (AWS / Azure / GCP)"
+                ),
+                "salary_min":    base,
+                "salary_max":    base + 400_000,
+                "currency":      "INR",
                 "contract_type": "full_time",
-                "country": "India",
-                "posted_date": "2025-08-30",
-                "apply_url": f"https://careers.{indian_companies[i % len(indian_companies)].lower().replace(' ', '')}.com/job-{i+1}"
-            }
-            jobs.append(job)
-        
+                "country":       "India",
+                "posted_date":   "",
+                "apply_url":     "",
+                "relevance_score": 0,
+            })
         return jobs
-    
-    def _get_us_jobs(self, query: str) -> List[Dict]:
-        """Get US jobs from Adzuna API"""
-        
-        if not self.app_id or not self.app_key:
-            return []
-        
-        try:
-            url = "https://api.adzuna.com/v1/api/jobs/us/search/1"
-            params = {
-                "app_id": self.app_id,
-                "app_key": self.app_key,
-                "what": query,
-                "results_per_page": 10,
-                "sort_by": "relevance"
+
+    # ── public standalone API ─────────────────
+    # These are the methods called directly by app.py routes.
+    # Each builds a minimal state, calls the appropriate node, and returns
+    # only what the route needs — keeping app.py decoupled from LangGraph.
+
+    def analyze_resume(self, resume_text: str) -> Dict[str, Any]:
+        """
+        Returns:
+            {
+              "analysis": str,
+              "keywords": List[str],
+              "score": float,
+              "warnings": List[str],
+              "timing": float,
             }
-            
-            response = requests.get(url, params=params, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                raw_jobs = data.get("results", [])
-                
-                formatted_jobs = []
-                for i, job in enumerate(raw_jobs):
-                    formatted_job = {
-                        "id": f"us_{job.get('id', uuid.uuid4().hex[:8])}",
-                        "title": job.get("title", "Software Developer"),
-                        "company": job.get("company", {}).get("display_name", "Tech Company"),
-                        "location": job.get("location", {}).get("display_name", "United States"),
-                        "description": (job.get("description", "")[:400] + "..." if len(job.get("description", "")) > 400 else job.get("description", "")),
-                        "full_description": job.get("description", ""),
-                        "salary_min": job.get("salary_min"),
-                        "salary_max": job.get("salary_max"),
-                        "currency": "USD",
-                        "contract_type": job.get("contract_type", "full_time"),
-                        "country": "US",
-                        "posted_date": job.get("created", "2025-08-30"),
-                        "apply_url": job.get("redirect_url", "")
-                    }
-                    formatted_jobs.append(formatted_job)
-                
-                return formatted_jobs
-                
-        except Exception as e:
-            print(f"Error fetching US jobs: {e}")
-            return []
-    
+        """
+        state = {**self._empty_state(), "resume_text": resume_text}
+        out   = self._resume_analysis_node(state)
+        return {
+            "analysis": out.get("resume_analysis", ""),
+            "keywords": out.get("resume_keywords", []),
+            "score":    out.get("resume_score", 0.0),
+            "warnings": out.get("warnings", []),
+            "timing":   out.get("step_timings", {}).get("resume_analysis", 0.0),
+        }
+
+    def search_jobs(self, query: str, keywords: Optional[List[str]] = None) -> Tuple[List[Dict], List[Dict], str]:
+        """
+        Returns: (all_jobs, ranked_jobs, location)
+        ranked_jobs are sorted by keyword overlap with the candidate.
+        """
+        state = {
+            **self._empty_state(),
+            "search_query":    query,
+            "resume_keywords": keywords or [],
+        }
+        out = self._job_search_node(state)
+        return out.get("jobs", []), out.get("ranked_jobs", []), out.get("location", "Unknown")
+
+    def analyze_job_match(self, resume_analysis: str, job: Dict, resume_keywords: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Returns the full match_result dict:
+            match_score, pre_score, keyword_overlap, analysis, …
+        """
+        state = {
+            **self._empty_state(),
+            "resume_analysis":  resume_analysis,
+            "resume_keywords":  resume_keywords or [],
+            "selected_job":     job,
+            "selected_job_id":  job.get("id", ""),
+        }
+        out = self._job_matching_node(state)
+        return out.get("match_result", {})
+
+    def generate_cover_letter(
+        self, resume_analysis: str, job: Dict, match_analysis: str,
+        keyword_overlap: Optional[List[str]] = None,
+    ) -> str:
+        state = {
+            **self._empty_state(),
+            "resume_analysis": resume_analysis,
+            "selected_job":    job,
+            "match_result":    {"analysis": match_analysis, "keyword_overlap": keyword_overlap or []},
+        }
+        out = self._cover_letter_node(state)
+        return out.get("cover_letter", "")
+
+    def generate_interview_tips(
+        self, resume_analysis: str, job: Dict, match_analysis: str,
+        keyword_overlap: Optional[List[str]] = None,
+    ) -> str:
+        state = {
+            **self._empty_state(),
+            "resume_analysis": resume_analysis,
+            "resume_text":     "",
+            "selected_job":    job,
+            "match_result":    {"analysis": match_analysis, "keyword_overlap": keyword_overlap or []},
+        }
+        out = self._interview_tips_node(state)
+        return out.get("interview_tips", "")
+
+    def generate_ats_tips(
+        self, resume_text: str, resume_keywords: List[str], job: Dict,
+    ) -> str:
+        """NEW: standalone ATS optimisation."""
+        state = {
+            **self._empty_state(),
+            "resume_text":     resume_text,
+            "resume_keywords": resume_keywords,
+            "selected_job":    job,
+        }
+        out = self._ats_tips_node(state)
+        return out.get("ats_tips", "")
+
+    # ── full workflow helpers ─────────────────
+
     def process_resume_and_search(self, resume_text: str, search_query: str) -> JobMatchingState:
-        """Process resume and search jobs using LangGraph workflow"""
-        
-        initial_state: JobMatchingState = {
-            "session_id": str(uuid.uuid4()),
-            "resume_text": resume_text,
-            "resume_analysis": "",
+        """Run the full workflow up through job_search (no job selected yet)."""
+        initial = {
+            **self._empty_state(),
+            "session_id":   str(uuid.uuid4()),
+            "resume_text":  resume_text,
             "search_query": search_query,
-            "jobs": [],
-            "location": "",
-            "selected_job": {},
-            "selected_job_id": "",
-            "match_result": {},
-            "cover_letter": "",
-            "interview_tips": "",
-            "current_step": "",
-            "error": ""
         }
-        
-        final_state = self.workflow.invoke(initial_state, {"recursion_limit": 2})
-        return final_state
-    
+        return self.workflow.invoke(initial, {"recursion_limit": 15})
+
     def complete_job_analysis(self, state: JobMatchingState, selected_job_id: str) -> JobMatchingState:
-        """Complete the job analysis workflow for selected job"""
-        
-        selected_job = None
-        for job in state.get("jobs", []):
-            if job["id"] == selected_job_id:
-                selected_job = job
-                break
-        
-        if not selected_job:
-            return {
-                **state,
-                "error": "Selected job not found"
-            }
-        
-        updated_state: JobMatchingState = {
-            **state,
-            "selected_job": selected_job,
-            "selected_job_id": selected_job_id
-        }
-        
-        final_state = self.workflow.invoke(updated_state)
-        return final_state
-    
-    def analyze_resume(self, resume_text: str) -> str:
-        """Standalone resume analysis"""
-        state: JobMatchingState = {
-            "session_id": "",
-            "resume_text": resume_text,
-            "resume_analysis": "",
-            "search_query": "",
-            "jobs": [],
-            "location": "",
-            "selected_job": {},
-            "selected_job_id": "",
-            "match_result": {},
-            "cover_letter": "",
-            "interview_tips": "",
-            "current_step": "",
-            "error": ""
-        }
-        
-        result_state = self._resume_analysis_node(state)
-        return result_state.get("resume_analysis", "Error in analysis")
-    
-    def search_jobs(self, query: str) -> Tuple[List[Dict], str]:
-        """Standalone job search"""
-        state: JobMatchingState = {
-            "session_id": "",
-            "resume_text": "",
-            "resume_analysis": "",
-            "search_query": query,
-            "jobs": [],
-            "location": "",
-            "selected_job": {},
-            "selected_job_id": "",
-            "match_result": {},
-            "cover_letter": "",
-            "interview_tips": "",
-            "current_step": "",
-            "error": ""
-        }
-        
-        result_state = self._job_search_node(state)
-        return result_state.get("jobs", []), result_state.get("location", "Unknown")
-    
-    def analyze_job_match(self, resume_analysis: str, job: Dict) -> Dict[str, Any]:
-        """Standalone job matching"""
-        state: JobMatchingState = {
-            "session_id": "",
-            "resume_text": "",
-            "resume_analysis": resume_analysis,
-            "search_query": "",
-            "jobs": [],
-            "location": "",
-            "selected_job": job,
-            "selected_job_id": job.get("id", ""),
-            "match_result": {},
-            "cover_letter": "",
-            "interview_tips": "",
-            "current_step": "",
-            "error": ""
-        }
-        
-        result_state = self._job_matching_node(state)
-        return result_state.get("match_result", {})
-    
-    def generate_cover_letter(self, resume_analysis: str, job: Dict, match_analysis: str) -> str:
-        """Standalone cover letter generation"""
-        state: JobMatchingState = {
-            "session_id": "",
-            "resume_text": "",
-            "resume_analysis": resume_analysis,
-            "search_query": "",
-            "jobs": [],
-            "location": "",
-            "selected_job": job,
-            "selected_job_id": job.get("id", ""),
-            "match_result": {"analysis": match_analysis},
-            "cover_letter": "",
-            "interview_tips": "",
-            "current_step": "",
-            "error": ""
-        }
-        
-        result_state = self._cover_letter_node(state)
-        return result_state.get("cover_letter", "Error generating cover letter")
-    
-    def generate_interview_tips(self, resume_analysis: str, job: Dict, match_analysis: str) -> str:
-        """Standalone interview tips generation"""
-        state: JobMatchingState = {
-            "session_id": "",
-            "resume_text": "",
-            "resume_analysis": resume_analysis,
-            "search_query": "",
-            "jobs": [],
-            "location": "",
-            "selected_job": job,
-            "selected_job_id": job.get("id", ""),
-            "match_result": {"analysis": match_analysis},
-            "cover_letter": "",
-            "interview_tips": "",
-            "current_step": "",
-            "error": ""
-        }
-        
-        result_state = self._interview_tips_node(state)
-        return result_state.get("interview_tips", "Error generating interview tips")
+        """Continue the workflow for a specific selected job."""
+        job = next((j for j in state.get("jobs", []) if j["id"] == selected_job_id), None)
+        if not job:
+            return {**state, "error": f"Job {selected_job_id} not found in session."}
+        updated = {**state, "selected_job": job, "selected_job_id": selected_job_id}
+        return self.workflow.invoke(updated, {"recursion_limit": 15})
