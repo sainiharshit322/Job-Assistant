@@ -10,10 +10,12 @@ import {
   TrendingUp,
   Shield,
   ChevronDown,
+  X,
 } from 'lucide-react';
 import ResumeUpload from '../components/ResumeUpload';
 import ResumeAnalysis from '../components/ResumeAnalysis';
 import { jobAssistantAPI } from '../services/api';
+import { clearSession, getSession, saveSession } from '../utils/session';
 import toast, { Toaster } from 'react-hot-toast';
 
 /* ─── DESIGN TOKENS ──────────────────────────────────────────────── */
@@ -247,11 +249,9 @@ const HomePage = () => {
 
   useEffect(() => {
     checkAPIStatus();
-    const sid  = localStorage.getItem('sessionId');
-    const an   = localStorage.getItem('resumeAnalysis');
-    const fn   = localStorage.getItem('resumeFilename');
-    if (sid && an) {
-      setAnalysisData({ sessionId: sid, analysis: an, filename: fn || 'Previous Resume' });
+    const session = getSession();
+    if (session) {
+      setAnalysisData(session);
       setCurrentStep(2);
     }
   }, []);
@@ -267,12 +267,18 @@ const HomePage = () => {
   };
 
   const handleAnalysisComplete = (data) => {
-    localStorage.setItem('sessionId', data.sessionId);
-    localStorage.setItem('resumeAnalysis', data.analysis);
-    localStorage.setItem('resumeFilename', data.filename);
+    saveSession(data);
     setAnalysisData(data);
     setCurrentStep(2);
     toast.success('Resume analysis complete!');
+  };
+
+  // Clears all session data and resets the page to upload state
+  const handleRemoveResume = () => {
+    clearSession();
+    setAnalysisData(null);
+    setCurrentStep(1);
+    toast.success('Resume removed. You can upload a new one.');
   };
 
   const handleFindJobs = () => {
@@ -369,7 +375,7 @@ const HomePage = () => {
                   <h2 className="display" style={{ fontSize: 'clamp(28px, 4vw, 52px)', lineHeight: .95, marginBottom: 12 }}>Upload Your CV</h2>
                   <p style={{ color: 'var(--muted)', fontSize: 16 }}>PDF only · Max 16 MB · Analysed in seconds</p>
                 </div>
-                <ResumeUpload onAnalysisComplete={handleAnalysisComplete} />
+                <ResumeUpload onAnalysisComplete={handleAnalysisComplete} onRemove={handleRemoveResume} />
               </motion.div>
             )}
 
@@ -380,9 +386,27 @@ const HomePage = () => {
                     <span className="tag tag-lime" style={{ marginBottom: 16, display: 'inline-flex' }}><CheckCircle size={11} /> Analysis Ready</span>
                     <h2 className="display" style={{ fontSize: 'clamp(28px, 4vw, 52px)', lineHeight: .95 }}>Your Profile<br /><span style={{ color: 'var(--lime)' }}>Decoded.</span></h2>
                   </div>
-                  <button className="btn-primary" onClick={handleFindJobs}>
-                    Find Jobs Now <ArrowRight size={16} />
-                  </button>
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                    {/* ── REMOVE RESUME BUTTON ── */}
+                    <button
+                      onClick={handleRemoveResume}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 8,
+                        padding: '11px 22px', borderRadius: 12, fontSize: 13,
+                        fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                        background: '#ef444415', color: '#ef4444',
+                        border: '1px solid #ef444430',
+                        transition: 'background .15s, box-shadow .15s',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#ef444425'; e.currentTarget.style.boxShadow = '0 0 16px #ef444420'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = '#ef444415'; e.currentTarget.style.boxShadow = 'none'; }}
+                    >
+                      <X size={14} /> Remove Resume
+                    </button>
+                    <button className="btn-primary" onClick={handleFindJobs}>
+                      Find Jobs Now <ArrowRight size={16} />
+                    </button>
+                  </div>
                 </div>
                 <ResumeAnalysis analysis={analysisData.analysis} filename={analysisData.filename} />
               </motion.div>
