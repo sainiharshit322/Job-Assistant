@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
   Brain, TrendingUp, Briefcase, BookmarkCheck,
   Users, Target, Sparkles, FileText, Search,
-  MessageSquare, BarChart3, Star, Plus, Zap,
+  MessageSquare, Plus, Zap,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import StatsCard from '../components/StatsCard';
@@ -90,8 +90,8 @@ const ACTIVITY = [
 ];
 
 /* stable random heights so bars don't re-randomise on every render */
-// const BAR_HEIGHTS = [62, 45, 78, 55, 88, 34, 70];
-// const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const BAR_HEIGHTS = [62, 45, 78, 55, 88, 34, 70];
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 /* ═════════════════════════════════════════════════════════════════ */
 const DashboardPage = () => {
@@ -100,7 +100,7 @@ const DashboardPage = () => {
 
   // read from localStorage — keep as state so it's reactive
   const sessionId = localStorage.getItem('sessionId');
-  // const savedJobs = useMemo(() => JSON.parse(localStorage.getItem('savedJobs') || '[]'), []);
+  const savedJobs = useMemo(() => JSON.parse(localStorage.getItem('savedJobs') || '[]'), []);
 
   const data = {
     profileStrength: 75, jobsApplied: 12,
@@ -199,38 +199,6 @@ const DashboardPage = () => {
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .3 }}>
                 <JobRecommendations sessionId={sessionId} />
               </motion.div>
-
-              {/* activity chart */}
-              {/* <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .4 }} className="dp-card">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-                  <h2 className="display" style={{ fontSize: 24, color: '#f5f5f5' }}>Activity Overview</h2>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                    <BarChart3 size={15} style={{ color: '#c6ff00' }} />
-                    <span style={{ fontSize: 12, color: '#888899' }}>Last 7 days</span>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {DAYS.map((day, i) => {
-                    const pct = BAR_HEIGHTS[i];
-                    return (
-                      <div key={day} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <span style={{ fontSize: 12, color: '#555566', width: 28, flexShrink: 0 }}>{day}</span>
-                        <div className="dp-bar-track" style={{ flex: 1 }}>
-                          <motion.div
-                            className="dp-bar-fill"
-                            initial={{ width: 0 }}
-                            animate={{ width: `${pct}%` }}
-                            transition={{ delay: .5 + i * .08, duration: .7, ease: 'easeOut' }}
-                          />
-                        </div>
-                        <span style={{ fontSize: 11, color: '#444455', width: 22, textAlign: 'right', flexShrink: 0 }}>
-                          {Math.round(pct / 10)}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </motion.div> */}
             </div>
 
             {/* RIGHT COLUMN */}
@@ -243,46 +211,6 @@ const DashboardPage = () => {
               <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: .4 }}>
                 <ActivityFeed activities={ACTIVITY} />
               </motion.div>
-
-              {/* AI Insights */}
-              {/* <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: .5 }} className="dp-card">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-                  <div style={{ width: 34, height: 34, borderRadius: 10, background: '#c6ff0018', border: '1px solid #c6ff0030', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Brain size={16} style={{ color: '#c6ff00' }} />
-                  </div>
-                  <h3 className="display" style={{ fontSize: 22, color: '#f5f5f5' }}>AI Insights</h3>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {[
-                    { icon: Star,        color: '#f59e0b', label: 'Top Skill',      text: 'React.js appears in 85% of your target jobs' },
-                    { icon: TrendingUp,  color: '#22c55e', label: 'Trending',       text: 'Full-stack roles are up 23% this month' },
-                    { icon: Target,      color: '#4f8aff', label: 'Recommendation', text: 'Add TypeScript to boost match scores by 15%' },
-                  ].map(({ icon: Icon, color, label, text }) => (
-                    <div key={label} className="dp-insight">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
-                        <Icon size={13} style={{ color }} />
-                        <span style={{ fontSize: 12, fontWeight: 600, color, textTransform: 'uppercase', letterSpacing: '.06em' }}>{label}</span>
-                      </div>
-                      <p style={{ fontSize: 13, color: '#aaaabc', lineHeight: 1.5 }}>{text}</p>
-                    </div>
-                  ))}
-                </div>
-              </motion.div> */}
-
-              {/* Saved jobs */}
-              {/* <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: .6 }} className="dp-card">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-                  <h3 className="display" style={{ fontSize: 22, color: '#f5f5f5' }}>Saved Jobs</h3>
-                  <BookmarkCheck size={16} style={{ color: '#888899' }} />
-                </div>
-                <div style={{ textAlign: 'center', padding: '8px 0 16px' }}>
-                  <div className="display" style={{ fontSize: 52, lineHeight: 1, color: '#f5f5f5' }}>{savedJobs.length}</div>
-                  <p style={{ fontSize: 13, color: '#888899', marginTop: 4, marginBottom: 20 }}>Jobs saved for later</p>
-                  <button className="dp-btn dp-btn-lime" style={{ width: '100%', justifyContent: 'center' }} onClick={() => navigate('/jobs')}>
-                    View All
-                  </button>
-                </div>
-              </motion.div> */}
             </div>
           </div>
 
